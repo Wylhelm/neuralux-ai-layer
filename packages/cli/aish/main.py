@@ -727,7 +727,8 @@ def health(watch: bool, interval: int):
 
 @cli.command()
 @click.option("--hotkey", is_flag=True, help="Run hotkey daemon (X11 only) [documented fallback on Wayland]")
-def overlay(hotkey: bool):
+@click.option("--tray", is_flag=True, help="Show system tray icon for quick toggle (requires Ayatana/AppIndicator)")
+def overlay(hotkey: bool, tray: bool):
     """Launch the Neuralux GUI overlay."""
     # Try to import GTK overlay components with a clear error if unavailable
     try:
@@ -735,6 +736,7 @@ def overlay(hotkey: bool):
         sys.path.insert(0, str(Path(__file__).parent.parent.parent))
         from overlay.overlay_window import OverlayApplication
         from overlay.config import OverlayConfig
+        # Tray is optional; imported lazily later
         from gi.repository import GLib  # type: ignore
     except Exception as e:  # pragma: no cover - environment dependent
         console.print("[red]Failed to load GTK4 overlay.[/red]")
@@ -756,7 +758,11 @@ def overlay(hotkey: bool):
             )
             listener.start()
             combo = "Ctrl+Space" if "Control" in config.hotkey or "control" in config.hotkey else "Alt+Space"
-            console.print(f"[green]Hotkey:[/green] {combo} (X11). On Wayland, create a desktop shortcut to run 'aish overlay'.")
+            import os as _os
+            if _os.environ.get("XDG_SESSION_TYPE", "").lower() == "x11":
+                console.print(f"[green]Hotkey:[/green] {combo} (X11)")
+            else:
+                console.print("[yellow]Wayland detected:[/yellow] Global hotkeys are restricted. Create a DE shortcut to run 'aish overlay'.")
         except Exception:
             console.print("[yellow]Hotkey unavailable. Install python-xlib or use a DE shortcut to run 'aish overlay'.[/yellow]")
 
@@ -833,6 +839,95 @@ def overlay(hotkey: bool):
         threading.Thread(target=_worker, daemon=True).start()
 
     app = OverlayApplication(config=config, on_command=on_command)
+
+    # Optional tray integration
+    tray_instance = None
+    if tray or getattr(config, "enable_tray", False):
+        try:
+            from overlay.tray import OverlayTray  # type: ignore
+
+            def _quit():
+                try:
+                    # Gracefully close the GTK app
+                    if app.window:
+                        app.window.hide()
+                    # Stop the main loop
+                    from gi.repository import Gtk as _Gtk  # type: ignore
+                    _Gtk.main_quit()
+                except Exception:
+                    pass
+
+            # Resolve tray icon
+            icon = config.tray_icon
+            if icon == "auto":
+                default_icon = str(Path(__file__).parent.parent.parent / "overlay" / "assets" / "neuralux-tray.svg")
+                icon = default_icon if Path(default_icon).exists() else "utilities-terminal"
+
+            tray_instance = OverlayTray(
+                on_toggle=lambda: GLib.idle_add(lambda: app.window and app.window.toggle_visibility()),
+                on_quit=_quit,
+                icon_name=icon,
+                app_name=config.app_name,
+            )
+            if not tray_instance.enabled:
+                console.print("[yellow]Tray not available via in-process integration. Falling back to external helper...[/yellow]")
+        except Exception:
+            console.print("[yellow]Tray integration failed to initialize. Attempting external helper...[/yellow]")
+
+        # Fallback: launch external tray helper (GTK3 + AppIndicator)
+        if not tray_instance or not getattr(tray_instance, "enabled", False):
+            try:
+                import subprocess as _sp
+                import os as _os
+                packages_dir = str(Path(__file__).parent.parent.parent)
+                env = _os.environ.copy()
+                env["PYTHONPATH"] = packages_dir + _os.pathsep + env.get("PYTHONPATH", "")
+                env["NEURALUX_APP_NAME"] = config.app_name
+                env["NEURALUX_TRAY_ICON"] = icon if isinstance(icon, str) else "utilities-terminal"
+                _sp.Popen([sys.executable, "-m", "overlay.tray_helper"], env=env)
+                console.print("[green]External tray helper started.[/green]")
+            except Exception:
+                console.print("[yellow]Could not start external tray helper. Ensure ayatana-appindicator is installed.[/yellow]")
+
+    # Subscribe to bus events for external tray helper control
+    try:
+        import threading as _threading
+        import asyncio as _asyncio
+
+        def _start_bus_listener():
+            async def _runner():
+                try:
+                    bus = MessageBusClient(NeuraluxConfig())
+                    await bus.connect()
+
+                    async def _on_toggle(_msg):
+                        try:
+                            GLib.idle_add(lambda: app.window and app.window.toggle_visibility())
+                        except Exception:
+                            pass
+
+                    async def _on_quit(_msg):
+                        try:
+                            from gi.repository import Gtk as _Gtk  # type: ignore
+                            GLib.idle_add(lambda: (app.window and app.window.hide(), False))
+                            _Gtk.main_quit()
+                        except Exception:
+                            pass
+
+                    await bus.subscribe("ui.overlay.toggle", _on_toggle)
+                    await bus.subscribe("ui.overlay.quit", _on_quit)
+
+                    # Keep the task alive
+                    stopper = _asyncio.Event()
+                    await stopper.wait()
+                except Exception:
+                    pass
+
+            _asyncio.run(_runner())
+
+        _threading.Thread(target=_start_bus_listener, daemon=True).start()
+    except Exception:
+        pass
 
     # Run the GTK application (blocks until closed)
     try:

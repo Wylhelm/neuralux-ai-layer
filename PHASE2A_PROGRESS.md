@@ -1,6 +1,6 @@
 # Phase 2A: Intelligence Layer - Progress Report
 
-**Status**: 🚧 In Progress (87.5% Complete - 14/16 tasks)  
+**Status**: 🚧 In Progress (90% Complete - 15/16 tasks)  
 **Last Updated**: October 25, 2025
 
 ---
@@ -234,7 +234,7 @@ Results: 3 relevant documents (16%, 15%, 14% match scores)
 
 ### GUI Overlay Assistant
 
-**Status**: ✅ **MVP COMPLETE**
+**Status**: ✅ **MVP COMPLETE + Tray**
 
 GTK4-based overlay assistant with Alt+Space activation (X11), fuzzy search, LLM integration, and minimal context.
 
@@ -299,6 +299,8 @@ GTK4-based overlay assistant with Alt+Space activation (X11), fuzzy search, LLM 
 - **CLI integration (`aish overlay`)** ✅
   - Launch overlay and optional `--hotkey` mode
   - Async NATS calls to LLM, filesystem, health
+  - `--tray` option with in-process tray + external helper fallback
+  - Customizable tray app name and icon
 
 #### UI Components
 
@@ -324,7 +326,7 @@ GTK4-based overlay assistant with Alt+Space activation (X11), fuzzy search, LLM 
 #### Remaining Work
 
 - Wayland-friendly hotkey integration (documented shortcut for now)
-- System tray integration for quick toggle
+- System tray integration for quick toggle ✅
 - Documentation polish and user testing
 
 ---
@@ -348,9 +350,10 @@ GTK4-based overlay assistant with Alt+Space activation (X11), fuzzy search, LLM 
 | Hotkey listener | ✅ | hotkey.py | packages/overlay/ |
 | Fuzzy search | ✅ | search.py | packages/overlay/ |
 | LLM integration (GUI) | ✅ | aish overlay | packages/cli/aish/ |
+| Tray integration | ✅ | tray.py + CLI | packages/overlay/, packages/cli/aish/ |
 | Context awareness | ✅ | overlay_window.py | packages/overlay/ |
 
-**Progress**: 14/16 tasks complete (87.5%)
+**Progress**: 15/16 tasks complete (90%)
 
 ---
 
@@ -541,10 +544,9 @@ GTK4-based overlay assistant with Alt+Space activation (X11), fuzzy search, LLM 
 
 ### Full Release (Target)
 
-- [ ] GUI overlay working with hotkey
-- [ ] Fuzzy search functional
-- [ ] LLM integration in overlay
-- [ ] Context awareness
+- [ ] System tray integration and desktop packaging
+- [ ] Wayland-friendly activation (documented shortcuts or portal)
+- [ ] Documentation polish and user testing
 - [ ] Comprehensive documentation
 - [ ] User testing on multiple DEs
 

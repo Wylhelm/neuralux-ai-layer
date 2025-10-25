@@ -114,17 +114,66 @@ sudo apt install -y python3-gi gir1.2-gtk-4.0 libgtk-4-1 libgtk-4-bin
 Launch the overlay:
 ```bash
 aish overlay
-# X11 hotkey (Ctrl+Space by default):
+# X11 hotkey (Alt+Space by default):
 aish overlay --hotkey
+# Tray icon (quick toggle from system tray):
+aish overlay --tray
 ```
 
-On Wayland, bind a desktop shortcut to run `aish overlay`.
+On Wayland, bind a desktop shortcut to run `aish overlay`. Tray works if AppIndicator is available.
 Press Esc to hide the overlay.
 
 Troubleshooting (X11): If the overlay appears behind other windows, ensure you're on Xorg and try:
 ```bash
 sudo apt install -y wmctrl
 wmctrl -x -r com.neuralux.overlay -b add,above,sticky
+```
+
+#### Desktop integration and tray (optional)
+
+Install AppIndicator support (Ubuntu/Debian) for the tray icon:
+```bash
+sudo apt install -y gir1.2-ayatanaappindicator3-0.1 libayatana-appindicator3-1
+```
+
+Create an application launcher:
+```bash
+mkdir -p ~/.local/share/applications
+cat > ~/.local/share/applications/neuralux-overlay.desktop << 'EOF'
+[Desktop Entry]
+Name=Neuralux Overlay
+Comment=Open the Neuralux assistant overlay
+Exec=aish overlay
+Terminal=false
+Type=Application
+Icon=utilities-terminal
+Categories=Utility;
+StartupNotify=false
+EOF
+```
+
+Autostart on login (optional):
+```bash
+mkdir -p ~/.config/autostart
+cp ~/.local/share/applications/neuralux-overlay.desktop ~/.config/autostart/
+```
+
+Tip: On Wayland, use the launcher entry or bind a DE keyboard shortcut to run `aish overlay`.
+You can also enable the tray by default by setting an environment variable:
+```bash
+export OVERLAY_ENABLE_TRAY=true
+```
+
+Customize tray name and icon (optional):
+```bash
+# App name shown to the desktop environment
+export OVERLAY_APP_NAME="Neuralux"
+
+# Use bundled icon (auto) or provide an absolute path or icon theme name
+# Defaults to bundled icon if available
+export OVERLAY_TRAY_ICON="$PWD/packages/overlay/assets/neuralux-tray.svg"
+
+aish overlay --tray
 ```
 
 ### Monitor System Health
@@ -190,7 +239,7 @@ neuralux-ai-layer/
 - [x] One-command installation script
 - [x] Comprehensive documentation
 
-### Phase 2A - Intelligence 🚧 In Progress (11/15 tasks)
+### Phase 2A - Intelligence 🚧 In Progress (14/16 tasks)
 - [x] System health monitoring (CPU, memory, disk, network)
 - [x] Real-time metrics collection with psutil
 - [x] Time-series storage with DuckDB
@@ -198,14 +247,15 @@ neuralux-ai-layer/
 - [x] NATS API endpoints for health queries
 - [x] Beautiful terminal dashboard (`aish health`)
 - [x] Live monitoring mode (`aish health --watch`)
-- [ ] System tray integration
+- [x] System tray integration
+- [ ] Desktop packaging
 - [x] GUI overlay (Alt+Space assistant)
 - [x] Command palette with fuzzy search
 - [x] Global hotkey listener (X11)
 - [x] LLM integration in GUI
 - [x] Screen context awareness (minimal)
 - [ ] Temporal intelligence (system history)
-- [ ] Documentation and testing
+- [ ] Documentation polish and user testing
 
 ### Phase 2B - Advanced Intelligence (Future)
 - [ ] Vision service (OCR, screen understanding)

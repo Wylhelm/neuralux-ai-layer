@@ -104,6 +104,49 @@ python service.py
 aish
 ```
 
+### Overlay Assistant and Desktop Integration (Optional)
+
+Install GTK bindings (Ubuntu/Debian):
+```bash
+sudo apt install -y python3-gi gir1.2-gtk-4.0 libgtk-4-1 libgtk-4-bin
+```
+
+Launch the overlay:
+```bash
+aish overlay
+# X11 hotkey (Alt+Space by default):
+aish overlay --hotkey
+```
+
+On Wayland, create a desktop shortcut that runs `aish overlay`.
+
+Install AppIndicator support for tray/desktop (Ubuntu/Debian):
+```bash
+sudo apt install -y gir1.2-ayatanaappindicator3-0.1 libayatana-appindicator3-1
+```
+
+Create a launcher entry:
+```bash
+mkdir -p ~/.local/share/applications
+cat > ~/.local/share/applications/neuralux-overlay.desktop << 'EOF'
+[Desktop Entry]
+Name=Neuralux Overlay
+Comment=Open the Neuralux assistant overlay
+Exec=aish overlay
+Terminal=false
+Type=Application
+Icon=utilities-terminal
+Categories=Utility;
+StartupNotify=false
+EOF
+```
+
+Autostart on login (optional):
+```bash
+mkdir -p ~/.config/autostart
+cp ~/.local/share/applications/neuralux-overlay.desktop ~/.config/autostart/
+```
+
 ## Your First Commands
 
 Once everything is running, try these:

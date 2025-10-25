@@ -17,7 +17,7 @@ Get up and running with Neuralux AI Layer in 5 minutes!
 ### 1. Clone the Repository
 
 ```bash
-git clone https://github.com/yourusername/neuralux-ai-layer
+git clone https://github.com/Wylhelm/neuralux-ai-layer
 cd neuralux-ai-layer
 ```
 
@@ -46,6 +46,8 @@ make install
 pip install -r requirements.txt
 pip install -e packages/common/
 pip install -e packages/cli/
+```
+
 ### 4. (Optional) Install GTK Bindings for the Overlay
 
 Ubuntu/Debian:
@@ -53,10 +55,7 @@ Ubuntu/Debian:
 sudo apt install -y python3-gi gir1.2-gtk-4.0 libgtk-4-1 libgtk-4-bin
 ```
 
-### 5. Start the LLM Service
-```
-
-### 4. Download an AI Model
+### 5. Download an AI Model
 
 You need a language model to use Neuralux. The default model is Llama-3.2-3B-Instruct (quantized, ~2GB):
 
@@ -71,7 +70,7 @@ wget https://huggingface.co/bartowski/Llama-3.2-3B-Instruct-GGUF/resolve/main/Ll
 
 **Note**: This download is ~2GB and may take a few minutes.
 
-### 5. Start the LLM Service
+### 6. Start the LLM Service
 
 In a new terminal:
 
@@ -88,7 +87,7 @@ INFO: Connected to NATS
 INFO: Uvicorn running on http://0.0.0.0:8000
 ```
 
-### 6. Try the AI Shell!
+### 7. Try the AI Shell!
 
 In another terminal:
 
@@ -110,9 +109,11 @@ aish> /explain ps aux | grep python
 aish overlay
 # X11 hotkey (Ctrl+Space by default):
 aish overlay --hotkey
+# System tray icon (optional):
+aish overlay --tray
 ```
 
-On Wayland, create a desktop shortcut that runs `aish overlay`.
+On Wayland, create a desktop shortcut that runs `aish overlay`. Tray works if AppIndicator is available.
 Press Esc to hide the overlay.
 
 ## Verification

@@ -45,16 +45,17 @@
 
 ### In Progress
 
-- **GUI Overlay Assistant** (MVP complete)
+- **GUI Overlay Assistant** (MVP complete + Tray)
   - Window and UI components ✅
   - Global hotkey listener (Alt+Space, X11) ✅
   - Fuzzy search (rapidfuzz fallback) ✅
   - LLM integration via NATS ✅
   - Minimal context awareness (active app) ✅
+  - System tray integration ✅
 
 ### Next Priorities
 
-1. System tray integration and desktop packaging
+1. Desktop packaging
 2. Voice interface (STT/TTS)
 3. Vision service (OCR, screen understanding)
 4. Temporal intelligence (system history)
@@ -497,7 +498,7 @@ accomplishments:
   - Beautiful Rich terminal UI
 ```
 
-### Phase 2A: Intelligence (In Progress) 🚧 62.5% Complete
+### Phase 2A: Intelligence (In Progress) 🚧 87.5% Complete
 ```yaml
 status: IN PROGRESS (October 2025)
 completed:
@@ -511,24 +512,21 @@ completed:
   - ✅ Enhanced document support (ODT, ODS, Excel)
   - ✅ Semantic search improvements (query extraction, scoring)
   - ✅ GUI overlay foundation (GTK4 window, theming)
-in_progress:
-  - 🚧 GUI overlay assistant (Alt+Space)
+  - ✅ GUI overlay assistant (Alt+Space, X11 hotkey)
     - ✅ Window and UI components
-    - ⏳ Global hotkey listener
-    - ⏳ Fuzzy search implementation
-    - ⏳ LLM integration
-    - ⏳ Context awareness
+    - ✅ Global hotkey listener (X11)
+    - ✅ Fuzzy search implementation
+    - ✅ LLM integration
+    - ✅ Minimal context awareness
 pending:
-  - ⏳ Vision and screen understanding
+  - ⏳ System tray integration and desktop packaging
   - ⏳ Temporal intelligence system
-  - ⏳ Voice interface (STT/TTS)
 deliverables:
   - ✅ Health monitoring service (production ready)
   - ✅ Enhanced CLI with health dashboard
-  - 🚧 GUI overlay (foundation complete)
-  - ⏳ Desktop integration package
-  - ⏳ Voice assistant daemon
-progress: 10/16 tasks (62.5%)
+  - ✅ GUI overlay (MVP complete)
+  - ⏳ Desktop integration package (tray + .desktop)
+progress: 14/16 tasks (87.5%)
 ```
 
 ### Phase 2B: Advanced Intelligence (Future)

@@ -19,6 +19,7 @@ class OverlayConfig(BaseSettings):
     # Appearance
     theme: str = "dark"  # dark or light
     font_size: int = 14
+    app_name: str = "Neuralux"
     
     # Behavior
     fuzzy_threshold: int = 60  # Minimum match score (0-100)
@@ -26,6 +27,8 @@ class OverlayConfig(BaseSettings):
     
     # Integration
     nats_url: str = "nats://localhost:4222"
+    enable_tray: bool = False  # Show system tray icon with toggle
+    tray_icon: str = "auto"  # "auto" uses bundled icon; can be icon name or absolute path
     
     class Config:
         env_prefix = "OVERLAY_"

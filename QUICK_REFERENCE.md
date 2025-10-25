@@ -85,7 +85,43 @@ aish status                              # Check services
 ### Overlay
 ```bash
 aish overlay                 # Launch GUI overlay (GTK4)
-aish overlay --hotkey        # Enable Ctrl+Space (default) on X11; Esc hides
+aish overlay --hotkey        # Enable Alt+Space (default) on X11; Esc hides
+aish overlay --tray          # Show system tray icon (Ayatana/AppIndicator)
+```
+
+#### Tray and desktop integration (optional)
+```bash
+# Install AppIndicator support (Ubuntu/Debian)
+sudo apt install -y gir1.2-ayatanaappindicator3-0.1 libayatana-appindicator3-1
+
+# Create launcher
+mkdir -p ~/.local/share/applications
+cat > ~/.local/share/applications/neuralux-overlay.desktop << 'EOF'
+[Desktop Entry]
+Name=Neuralux Overlay
+Comment=Open the Neuralux assistant overlay
+Exec=aish overlay
+Terminal=false
+Type=Application
+Icon=utilities-terminal
+Categories=Utility;
+StartupNotify=false
+EOF
+
+# Autostart on login (optional)
+mkdir -p ~/.config/autostart
+cp ~/.local/share/applications/neuralux-overlay.desktop ~/.config/autostart/
+```
+
+Enable tray by default via env:
+```bash
+export OVERLAY_ENABLE_TRAY=true
+```
+
+Customize tray name and icon:
+```bash
+export OVERLAY_APP_NAME="Neuralux"
+export OVERLAY_TRAY_ICON="$PWD/packages/overlay/assets/neuralux-tray.svg"
 ```
 
 ## 📁 Important Files
@@ -222,7 +258,7 @@ Based on your `plan.md`:
 
 ### Phase 2 (Next)
 - Vision service
-- GUI overlay (Control+Space)
+- GUI overlay (Alt+Space)
 - Audio service (STT/TTS)
 - Temporal intelligence
 - System monitoring
