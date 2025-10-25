@@ -85,7 +85,7 @@ aish status                              # Check services
 ### Overlay
 ```bash
 aish overlay                 # Launch GUI overlay (GTK4)
-aish overlay --hotkey        # Enable Ctrl+Space (default) on X11
+aish overlay --hotkey        # Enable Ctrl+Space (default) on X11; Esc hides
 ```
 
 ## 📁 Important Files
@@ -222,7 +222,7 @@ Based on your `plan.md`:
 
 ### Phase 2 (Next)
 - Vision service
-- GUI overlay (Alt+Space)
+- GUI overlay (Control+Space)
 - Audio service (STT/TTS)
 - Temporal intelligence
 - System monitoring

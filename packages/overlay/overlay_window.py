@@ -36,6 +36,11 @@ class OverlayWindow(Gtk.ApplicationWindow):
             self.set_keep_above(True)
         except Exception:
             pass
+        try:
+            # Ensure the window can take focus when shown
+            self.set_focusable(True)
+        except Exception:
+            pass
 
         # Fullscreen option
         if config.fullscreen:
@@ -52,6 +57,13 @@ class OverlayWindow(Gtk.ApplicationWindow):
         
         # Connect signals
         self.connect("close-request", self._on_close_request)
+        # Key handling (Escape to close, arrow navigation potential)
+        try:
+            key_controller = Gtk.EventControllerKey()
+            key_controller.connect("key-pressed", self._on_key_pressed)
+            self.add_controller(key_controller)
+        except Exception:
+            pass
         
         logger.info("Overlay window created")
     
@@ -217,6 +229,16 @@ class OverlayWindow(Gtk.ApplicationWindow):
         """Handle window close request."""
         self.hide()
         return True  # Prevent destruction
+
+    def _on_key_pressed(self, controller, keyval, keycode, state):
+        """Handle global key presses for the window."""
+        try:
+            if keyval == Gdk.KEY_Escape:
+                self.hide()
+                return True
+        except Exception:
+            pass
+        return False
     
     def toggle_visibility(self):
         """Toggle window visibility."""
@@ -225,6 +247,44 @@ class OverlayWindow(Gtk.ApplicationWindow):
         else:
             self.show()
             self.present()
+            # Ensure we are on top and raised
+            try:
+                self.set_keep_above(True)
+            except Exception:
+                pass
+            try:
+                surface = self.get_surface()
+                if surface is not None and hasattr(surface, "raise_"):
+                    surface.raise_()
+            except Exception:
+                pass
+            # X11: request ABOVE state from WM
+            try:
+                self._ensure_above_x11()
+            except Exception:
+                pass
+            # Make modal briefly to defeat focus-stealing prevention on some WMs
+            try:
+                self.set_modal(True)
+            except Exception:
+                pass
+            # Re-raise shortly after mapping to ensure we float above
+            try:
+                def _reraises():
+                    try:
+                        self.set_keep_above(True)
+                        surf = self.get_surface()
+                        if surf is not None and hasattr(surf, "raise_"):
+                            surf.raise_()
+                        self._ensure_above_x11()
+                        self.present()
+                        self.search_entry.grab_focus()
+                    except Exception:
+                        pass
+                    return False
+                GLib.timeout_add(100, _reraises)
+            except Exception:
+                pass
             # Position window at screen center (best-effort, primarily X11)
             try:
                 display = Gdk.Display.get_default()
@@ -326,6 +386,50 @@ class OverlayWindow(Gtk.ApplicationWindow):
         except Exception:
             pass
         return None
+
+    def _ensure_above_x11(self):
+        """Ask the X11 WM via EWMH to keep this window above."""
+        try:
+            from gi.repository import GdkX11  # type: ignore
+            from Xlib import X, Xatom, display, protocol  # type: ignore
+        except Exception:
+            return
+
+        surface = self.get_surface()
+        if surface is None:
+            return
+        try:
+            xid = GdkX11.X11Surface.get_xid(surface)
+        except Exception:
+            return
+
+        d = display.Display()
+        root = d.screen().root
+        win = d.create_resource_object('window', xid)
+
+        NET_WM_STATE = d.intern_atom('_NET_WM_STATE')
+        NET_WM_STATE_ABOVE = d.intern_atom('_NET_WM_STATE_ABOVE')
+        NET_WM_WINDOW_TYPE = d.intern_atom('_NET_WM_WINDOW_TYPE')
+        NET_WM_WINDOW_TYPE_DIALOG = d.intern_atom('_NET_WM_WINDOW_TYPE_DIALOG')
+
+        # Set a dialog type (commonly floats above normal windows)
+        try:
+            win.change_property(NET_WM_WINDOW_TYPE, Xatom.ATOM, 32, [NET_WM_WINDOW_TYPE_DIALOG])
+        except Exception:
+            pass
+
+        # Send client message to add ABOVE state (1 = _NET_WM_STATE_ADD)
+        try:
+            ev = protocol.event.ClientMessage(
+                window=win,
+                client_type=NET_WM_STATE,
+                data=(32, [1, NET_WM_STATE_ABOVE, 0, 0, 0])
+            )
+            mask = X.SubstructureRedirectMask | X.SubstructureNotifyMask
+            root.send_event(ev, event_mask=mask)
+            d.flush()
+        except Exception:
+            pass
 
 
 class OverlayApplication(Gtk.Application):

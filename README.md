@@ -119,6 +119,13 @@ aish overlay --hotkey
 ```
 
 On Wayland, bind a desktop shortcut to run `aish overlay`.
+Press Esc to hide the overlay.
+
+Troubleshooting (X11): If the overlay appears behind other windows, ensure you're on Xorg and try:
+```bash
+sudo apt install -y wmctrl
+wmctrl -x -r com.neuralux.overlay -b add,above,sticky
+```
 
 ### Monitor System Health
 

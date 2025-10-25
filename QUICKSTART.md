@@ -113,6 +113,7 @@ aish overlay --hotkey
 ```
 
 On Wayland, create a desktop shortcut that runs `aish overlay`.
+Press Esc to hide the overlay.
 
 ## Verification
 

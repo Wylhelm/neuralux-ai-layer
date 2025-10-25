@@ -743,6 +743,9 @@ def overlay(hotkey: bool):
         console.print(f"Details: {e}")
         sys.exit(1)
 
+    # Create config before using it in hotkey setup
+    config = OverlayConfig()
+
     if hotkey:
         # Try to start X11 hotkey listener (Wayland will be a no-op)
         try:
@@ -756,8 +759,6 @@ def overlay(hotkey: bool):
             console.print(f"[green]Hotkey:[/green] {combo} (X11). On Wayland, create a desktop shortcut to run 'aish overlay'.")
         except Exception:
             console.print("[yellow]Hotkey unavailable. Install python-xlib or use a DE shortcut to run 'aish overlay'.[/yellow]")
-
-    config = OverlayConfig()
 
     # Async command handler that queries LLM and shows minimal status
     async def handle_query(text: str):
