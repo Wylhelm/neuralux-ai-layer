@@ -7,8 +7,8 @@ from typing import AsyncIterator, Dict, List, Optional
 import structlog
 from llama_cpp import Llama, LlamaGrammar
 
-from .config import LLMServiceConfig
-from .models import LLMRequest, LLMResponse, Message, Role
+from config import LLMServiceConfig
+from models import LLMRequest, LLMResponse, Message, Role
 
 logger = structlog.get_logger(__name__)
 

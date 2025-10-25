@@ -22,7 +22,7 @@ class LLMServiceConfig(BaseSettings):
     host: str = "0.0.0.0"
     
     # Model paths
-    model_path: Path = Path("./models")
+    model_path: Path = Path(__file__).parent.parent.parent / "models"
     default_model: str = "llama-3.2-3b-instruct-q4_k_m.gguf"
     
     # Model parameters

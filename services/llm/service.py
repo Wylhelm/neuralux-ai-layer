@@ -15,9 +15,9 @@ from neuralux.config import NeuraluxConfig
 from neuralux.logger import setup_logging
 from neuralux.messaging import MessageBusClient
 
-from .config import LLMServiceConfig
-from .llm_backend import LlamaCppBackend
-from .models import (
+from config import LLMServiceConfig
+from llm_backend import LlamaCppBackend
+from models import (
     EmbedRequest,
     EmbedResponse,
     LLMRequest,

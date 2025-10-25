@@ -183,14 +183,22 @@ Current context:
                 with console.status("[bold yellow]Thinking...[/bold yellow]"):
                     response = await self.ask_llm(user_input, mode="command")
                 
+                # Clean the response - remove markdown code blocks
+                clean_response = response.strip()
+                if clean_response.startswith('```'):
+                    # Remove code block markers
+                    lines = clean_response.split('\n')
+                    lines = [l for l in lines if not l.strip().startswith('```')]
+                    clean_response = '\n'.join(lines).strip()
+                
                 # Display the suggested command
                 console.print("\n[bold]Suggested command:[/bold]")
-                syntax = Syntax(response, "bash", theme="monokai", line_numbers=False)
+                syntax = Syntax(clean_response, "bash", theme="monokai", line_numbers=False)
                 console.print(syntax)
                 
                 # Ask for confirmation
                 if Confirm.ask("\nExecute this command?", default=False):
-                    await self._execute_command(response)
+                    await self._execute_command(clean_response)
                 else:
                     console.print("[yellow]Command not executed[/yellow]")
                     
@@ -217,6 +225,14 @@ Current context:
     async def _execute_command(self, command: str):
         """Execute a shell command."""
         console.print("\n[bold]Executing...[/bold]")
+        
+        # Clean up command - join multiple lines with && if needed
+        command = command.strip()
+        if '\n' in command:
+            # Multiple commands - join with &&
+            commands = [c.strip() for c in command.split('\n') if c.strip()]
+            command = ' && '.join(commands)
+        
         try:
             result = subprocess.run(
                 command,
@@ -224,6 +240,7 @@ Current context:
                 cwd=self.context['cwd'],
                 capture_output=True,
                 text=True,
+                timeout=30,  # 30 second timeout
             )
             
             if result.stdout:
@@ -235,7 +252,9 @@ Current context:
                 console.print(f"[red]Command failed with exit code {result.returncode}[/red]")
             else:
                 console.print("[green]✓ Command completed successfully[/green]")
-                
+        
+        except subprocess.TimeoutExpired:
+            console.print(f"[red]Command timed out after 30 seconds[/red]")
         except Exception as e:
             console.print(f"[red]Error executing command: {e}[/red]")
     
@@ -277,11 +296,14 @@ Current context:
         console.print(Markdown(help_text))
 
 
-@click.group()
+@click.group(invoke_without_command=True)
 @click.version_option(version="0.1.0")
-def cli():
+@click.pass_context
+def cli(ctx):
     """Neuralux AI Shell - Natural language command interface."""
-    pass
+    if ctx.invoked_subcommand is None:
+        # No subcommand provided, start interactive mode
+        ctx.invoke(ask)
 
 
 @cli.command()
