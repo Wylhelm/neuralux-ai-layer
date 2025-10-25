@@ -35,10 +35,10 @@ You now have a working foundation for the Neuralux AI Layer! This guide will hel
 
 ```bash
 # Start NATS, Redis, and Qdrant
-docker-compose up -d
+docker compose up -d
 
 # Verify services are running
-docker-compose ps
+docker compose ps
 ```
 
 All three services should show "Up" status.
@@ -148,7 +148,7 @@ aish status
 curl http://localhost:8222/varz
 
 # If not, start infrastructure
-docker-compose up -d
+docker compose up -d
 ```
 
 ### "Model not found"
@@ -188,11 +188,11 @@ cd services/llm && python service.py
 
 ```bash
 # Restart everything
-docker-compose down
-docker-compose up -d
+docker compose down
+docker compose up -d
 
 # Check logs
-docker-compose logs -f
+docker compose logs -f
 ```
 
 ## Configuration
@@ -321,7 +321,7 @@ Try different models for different tasks:
 ### Logs
 ```bash
 # Infrastructure logs
-docker-compose logs -f
+docker compose logs -f
 
 # LLM service logs
 # Check the terminal where you ran python service.py
@@ -345,7 +345,7 @@ make stop
 
 # Or manually:
 # 1. Ctrl+C in the LLM service terminal
-# 2. docker-compose down
+# 2. docker compose down
 ```
 
 ## Development Mode

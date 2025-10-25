@@ -26,14 +26,14 @@ cd neuralux-ai-layer
 Start the message bus, vector database, and cache:
 
 ```bash
-docker-compose up -d
+docker compose up -d
 ```
 
 Wait a moment for services to initialize:
 
 ```bash
 # Check status (all should show as "Up")
-docker-compose ps
+docker compose ps
 ```
 
 ### 3. Install Python Packages
@@ -152,11 +152,11 @@ Key settings:
 ```bash
 # Check Docker
 docker --version
-docker-compose --version
+docker compose version
 
 # Restart services
-docker-compose down
-docker-compose up -d
+docker compose down
+docker compose up -d
 ```
 
 ### LLM service fails to start
@@ -192,7 +192,7 @@ Now that you have the basics working:
 ## Getting Help
 
 - Check the documentation in `docs/`
-- View logs: `docker-compose logs -f`
+- View logs: `docker compose logs -f`
 - LLM service logs: Check the terminal where you ran `python service.py`
 
 ## Stopping Neuralux
@@ -201,7 +201,7 @@ Now that you have the basics working:
 # Stop the LLM service (Ctrl+C in its terminal)
 
 # Stop infrastructure services
-docker-compose down
+docker compose down
 ```
 
 ---

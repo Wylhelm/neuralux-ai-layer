@@ -305,7 +305,7 @@ All services use structured logging:
 View logs:
 ```bash
 # Infrastructure logs
-docker-compose logs -f
+docker compose logs -f
 
 # Service logs
 # (check terminal where service is running)

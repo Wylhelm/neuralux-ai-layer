@@ -42,7 +42,7 @@ git clone https://github.com/yourusername/neuralux-ai-layer
 cd neuralux-ai-layer
 
 # Start core services
-docker-compose up -d
+docker compose up -d
 
 # Install Python dependencies
 pip install -r requirements.txt
