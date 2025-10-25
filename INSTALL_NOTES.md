@@ -15,10 +15,6 @@ If you encounter OpenMP linking errors during installation, use:
 CMAKE_ARGS="-DGGML_BLAS=OFF -DGGML_OPENMP=OFF" pip install llama-cpp-python --no-cache-dir
 ```
 
-**Note**: This issue occurs when conda base environment interferes with compilation. To avoid this:
-```bash
-conda deactivate  # Deactivate conda base before installing
-```
 
 ## Installation Complete Checklist
 

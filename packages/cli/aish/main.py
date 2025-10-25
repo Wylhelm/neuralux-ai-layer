@@ -76,6 +76,21 @@ class AIShell:
         
         return "\n".join(context_parts)
     
+    async def search_files(self, query: str) -> dict:
+        """Search for files by content."""
+        if not self.message_bus:
+            return {"error": "Not connected to message bus"}
+        
+        try:
+            response = await self.message_bus.request(
+                "system.file.search",
+                {"query": query, "limit": 10},
+                timeout=10.0
+            )
+            return response
+        except Exception as e:
+            return {"error": str(e)}
+    
     async def ask_llm(self, user_input: str, mode: str = "command") -> str:
         """Ask the LLM for help."""
         if not self.message_bus:
@@ -175,8 +190,20 @@ Current context:
                     command = user_input[9:]
                     await self._explain_command(command)
                     continue
+                elif user_input.startswith("/search "):
+                    search_query = user_input[8:]
+                    await self._search_files_interactive(search_query)
+                    continue
                 elif user_input.startswith("/"):
                     console.print(f"[red]Unknown command: {user_input}[/red]")
+                    continue
+                
+                # Detect file search queries (semantic)
+                search_keywords = ["find files", "search files", "locate files", "files about", "documents about", "files containing"]
+                is_search_query = any(keyword in user_input.lower() for keyword in search_keywords)
+                
+                if is_search_query:
+                    await self._search_files_interactive(user_input)
                     continue
                 
                 # Get command from LLM
@@ -221,6 +248,56 @@ Current context:
         md = Markdown(explanation)
         console.print("\n[bold]Explanation:[/bold]")
         console.print(Panel(md, border_style="blue"))
+    
+    async def _search_files_interactive(self, query: str):
+        """Search files and display results interactively."""
+        with console.status(f"[bold yellow]Searching for: {query}...[/bold yellow]"):
+            result = await self.search_files(query)
+        
+        if "error" in result:
+            error = result["error"]
+            if "Connection refused" in error or "not found" in error.lower():
+                console.print("\n[yellow]⚠ Filesystem service not running[/yellow]")
+                console.print("\n[bold]To enable file search:[/bold]")
+                console.print("1. Start the filesystem service:")
+                console.print("   cd services/filesystem && python service.py &")
+                console.print("\n2. Index your files:")
+                console.print("   aish index ~/Documents")
+            else:
+                console.print(f"\n[red]Error: {error}[/red]")
+            return
+        
+        results = result.get("results", [])
+        
+        if not results:
+            console.print(f"\n[yellow]No files found matching: {query}[/yellow]")
+            console.print("\n[bold]Tips:[/bold]")
+            console.print("- Make sure files are indexed: aish index ~/path/to/directory")
+            console.print("- Try different search terms")
+            console.print("- Check that files contain text content")
+            return
+        
+        console.print(f"\n[bold]Found {len(results)} files:[/bold]\n")
+        
+        for i, res in enumerate(results, 1):
+            score_pct = int(res["score"] * 100)
+            console.print(f"[bold cyan]{i}.[/bold cyan] [bold]{res['filename']}[/bold] (Score: {score_pct}%)")
+            console.print(f"   Path: {res['file_path']}")
+            console.print(f"   {res['snippet'][:150]}...")
+            console.print("")
+        
+        # Ask if user wants to open a file
+        if Confirm.ask("\nOpen a file?", default=False):
+            try:
+                file_num = int(Prompt.ask("Which file? (number)"))
+                if 1 <= file_num <= len(results):
+                    file_path = results[file_num - 1]["file_path"]
+                    # Try to open with xdg-open
+                    import subprocess
+                    subprocess.run(["xdg-open", file_path])
+                    console.print(f"[green]✓ Opened {file_path}[/green]")
+            except (ValueError, KeyboardInterrupt):
+                pass
     
     async def _execute_command(self, command: str):
         """Execute a shell command."""
@@ -391,6 +468,53 @@ def status():
                     console.print("[yellow]⚠[/yellow] LLM service: Unexpected status")
         except:
             console.print("[red]✗[/red] LLM service: Not running")
+        
+        # Check filesystem service
+        try:
+            import httpx
+            async with httpx.AsyncClient() as client:
+                response = await client.get("http://localhost:8003/", timeout=5.0)
+                if response.status_code == 200:
+                    console.print("[green]✓[/green] Filesystem service: Running")
+                else:
+                    console.print("[yellow]⚠[/yellow] Filesystem service: Unexpected status")
+        except:
+            console.print("[red]✗[/red] Filesystem service: Not running")
+    
+    asyncio.run(run())
+
+
+@cli.command()
+@click.argument("directory", type=click.Path(exists=True))
+@click.option("--recursive/--no-recursive", default=True, help="Index subdirectories")
+def index(directory, recursive):
+    """Index a directory for semantic file search."""
+    shell = AIShell()
+    
+    async def run():
+        if await shell.connect():
+            try:
+                console.print(f"[bold]Indexing {directory}...[/bold]\n")
+                
+                response = await shell.message_bus.request(
+                    "system.file.index",
+                    {"directory": directory, "recursive": recursive},
+                    timeout=300.0  # 5 min timeout for large directories
+                )
+                
+                if "error" in response:
+                    console.print(f"[red]Error: {response['error']}[/red]")
+                else:
+                    console.print(f"[green]✓ Indexed {response['files_indexed']} files[/green]")
+                    console.print(f"  Created {response['chunks_created']} searchable chunks")
+                    console.print(f"  Duration: {response['duration_seconds']:.1f}s")
+                    
+                    if response.get('errors'):
+                        console.print(f"\n[yellow]⚠ {len(response['errors'])} errors:[/yellow]")
+                        for error in response['errors'][:5]:  # Show first 5
+                            console.print(f"  {error}")
+            finally:
+                await shell.disconnect()
     
     asyncio.run(run())
 
