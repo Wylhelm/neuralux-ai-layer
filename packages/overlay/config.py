@@ -1,0 +1,32 @@
+"""Configuration for GUI overlay."""
+
+from pathlib import Path
+from pydantic_settings import BaseSettings
+
+
+class OverlayConfig(BaseSettings):
+    """Configuration for the overlay."""
+    
+    # Window settings
+    window_width: int = 800
+    window_height: int = 600
+    window_opacity: float = 0.95
+    
+    # Hotkey
+    hotkey: str = "<Alt>space"  # GTK accelerator format
+    
+    # Appearance
+    theme: str = "dark"  # dark or light
+    font_size: int = 14
+    
+    # Behavior
+    fuzzy_threshold: int = 60  # Minimum match score (0-100)
+    max_results: int = 10
+    
+    # Integration
+    nats_url: str = "nats://localhost:4222"
+    
+    class Config:
+        env_prefix = "OVERLAY_"
+        case_sensitive = False
+
