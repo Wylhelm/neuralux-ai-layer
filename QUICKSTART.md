@@ -46,6 +46,14 @@ make install
 pip install -r requirements.txt
 pip install -e packages/common/
 pip install -e packages/cli/
+### 4. (Optional) Install GTK Bindings for the Overlay
+
+Ubuntu/Debian:
+```bash
+sudo apt install -y python3-gi gir1.2-gtk-4.0 libgtk-4-1 libgtk-4-bin
+```
+
+### 5. Start the LLM Service
 ```
 
 ### 4. Download an AI Model
@@ -95,6 +103,16 @@ aish> show me large files in my downloads folder
 aish> what's using the most CPU?
 aish> /explain ps aux | grep python
 ```
+
+### Overlay Assistant
+
+```bash
+aish overlay
+# X11 hotkey (Alt+Space):
+aish overlay --hotkey
+```
+
+On Wayland, create a desktop shortcut that runs `aish overlay`.
 
 ## Verification
 

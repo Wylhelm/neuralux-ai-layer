@@ -82,6 +82,12 @@ aish explain "tar -xzf file.tar.gz"      # Explain command
 aish status                              # Check services
 ```
 
+### Overlay
+```bash
+aish overlay                 # Launch GUI overlay (GTK4)
+aish overlay --hotkey        # Enable Alt+Space on X11
+```
+
 ## 📁 Important Files
 
 ### Configuration

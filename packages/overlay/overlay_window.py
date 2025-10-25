@@ -8,7 +8,8 @@ from gi.repository import Gtk, Gdk, GLib
 from typing import Callable, Optional
 import structlog
 
-from config import OverlayConfig
+from .config import OverlayConfig
+from .search import suggest, Suggestion
 
 logger = structlog.get_logger(__name__)
 
@@ -22,14 +23,26 @@ class OverlayWindow(Gtk.ApplicationWindow):
         
         self.config = config
         self.on_command = on_command
+        self._active_app: Optional[str] = None
         
         # Window properties
         self.set_title("Neuralux")
         self.set_default_size(config.window_width, config.window_height)
         self.set_resizable(False)
         
-        # Make it a dialog-like window (centered, always on top)
+        # Make it a dialog-like window (always on top)
         self.set_decorated(False)  # No title bar
+        try:
+            self.set_keep_above(True)
+        except Exception:
+            pass
+
+        # Fullscreen option
+        if config.fullscreen:
+            try:
+                self.maximize()
+            except Exception:
+                pass
         
         # Setup UI
         self._setup_ui()
@@ -44,8 +57,16 @@ class OverlayWindow(Gtk.ApplicationWindow):
     
     def _setup_ui(self):
         """Setup the user interface."""
-        # Main container
+        # Outer container to center inner content
+        outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        outer.set_hexpand(True)
+        outer.set_vexpand(True)
+        outer.set_halign(Gtk.Align.CENTER)
+        outer.set_valign(Gtk.Align.CENTER)
+
+        # Inner content box (fixed width to keep centered card look)
         main_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        main_box.set_size_request(self.config.window_width, self.config.window_height)
         main_box.set_margin_top(20)
         main_box.set_margin_bottom(20)
         main_box.set_margin_start(20)
@@ -64,6 +85,7 @@ class OverlayWindow(Gtk.ApplicationWindow):
         scrolled.set_size_request(-1, 400)
         scrolled.set_vexpand(True)
         scrolled.set_margin_top(10)
+        scrolled.get_style_context().add_class("results-scroller")
         
         # List box for results
         self.results_list = Gtk.ListBox()
@@ -80,7 +102,9 @@ class OverlayWindow(Gtk.ApplicationWindow):
         self.status_label.set_halign(Gtk.Align.CENTER)
         main_box.append(self.status_label)
         
-        self.set_child(main_box)
+        outer.append(main_box)
+        self.set_child(outer)
+        GLib.timeout_add_seconds(5, self._refresh_context)
     
     def _setup_styling(self):
         """Setup CSS styling."""
@@ -104,28 +128,43 @@ class OverlayWindow(Gtk.ApplicationWindow):
             border-color: #89b4fa;
         }
         
-        listbox {
+        .results-scroller,
+        .results-scroller > viewport {
+            background: transparent;
+        }
+
+        list {
             background: transparent;
         }
         
-        listbox row {
-            background: #313244;
-            color: #cdd6f4;
-            border-radius: 6px;
-            margin: 4px 0;
-            padding: 10px;
+        list row {
+            background: #262737; /* darker card */
+            color: #e6edf3;
+            border-radius: 8px;
+            margin: 6px 0;
+            padding: 12px;
         }
         
-        listbox row:selected {
-            background: #45475a;
+        list row:selected {
+            background: #3a3c52;
         }
         
-        listbox row:hover {
-            background: #3e4051;
+        list row:hover {
+            background: #32344a;
         }
         
         label {
             color: #cdd6f4;
+        }
+        
+        .result-title {
+            font-weight: bold;
+        }
+        
+        .result-content {
+            font-family: monospace;
+            color: #e6edf3; /* brighter for readability */
+            font-size: 14px;
         }
         """
         css_provider.load_from_data(css)
@@ -141,20 +180,38 @@ class OverlayWindow(Gtk.ApplicationWindow):
         text = entry.get_text().strip()
         if text:
             self.on_command(text)
-            self.hide()
             entry.set_text("")
     
     def _on_entry_changed(self, entry):
         """Handle text changes in search entry."""
         text = entry.get_text()
-        # TODO: Update results based on fuzzy search
         logger.debug("Search text changed", text=text)
+        self.clear_results()
+        for s in suggest(text, max_results=self.config.max_results, threshold=self.config.fuzzy_threshold):
+            self._add_suggestion_row(s)
     
     def _on_result_activated(self, list_box, row):
         """Handle selection of a result."""
-        # TODO: Execute selected action
-        logger.debug("Result activated", row_index=row.get_index())
-        self.hide()
+        idx = row.get_index()
+        child = row.get_child()
+        payload = getattr(child, "payload", None)
+        logger.debug("Result activated", row_index=idx)
+        if payload and isinstance(payload, dict):
+            # Dispatch to command handler via status bar prompt
+            try:
+                action_type = payload.get("type")
+                if action_type == "llm_query":
+                    self.on_command(payload.get("query", ""))
+                elif action_type == "file_search":
+                    # Prefix to drive filesystem search via CLI backend
+                    self.on_command(f"/search {payload.get('query', '')}")
+                elif action_type == "health_summary":
+                    # Ask health via CLI backend
+                    self.on_command("/health")
+                else:
+                    self.on_command(str(payload))
+            except Exception:
+                pass
     
     def _on_close_request(self, window):
         """Handle window close request."""
@@ -168,6 +225,18 @@ class OverlayWindow(Gtk.ApplicationWindow):
         else:
             self.show()
             self.present()
+            # Position window at screen center (best-effort, primarily X11)
+            try:
+                display = Gdk.Display.get_default()
+                monitor = display.get_primary_monitor()
+                geometry = monitor.get_geometry()
+                width = self.get_width()
+                height = self.get_height()
+                x = geometry.x + (geometry.width - width) // 2
+                y = geometry.y + (geometry.height - height) // 2
+                self.move(x, y)
+            except Exception:
+                pass
             self.search_entry.grab_focus()
     
     def add_result(self, title: str, subtitle: str = ""):
@@ -179,14 +248,43 @@ class OverlayWindow(Gtk.ApplicationWindow):
         title_label = Gtk.Label()
         title_label.set_markup(f"<b>{title}</b>")
         title_label.set_halign(Gtk.Align.START)
+        title_label.get_style_context().add_class("result-title")
         box.append(title_label)
         
         if subtitle:
+            # Use a selectable, wrapping label for content
             subtitle_label = Gtk.Label()
-            subtitle_label.set_markup(f"<span size='small' alpha='70%'>{subtitle}</span>")
-            subtitle_label.set_halign(Gtk.Align.START)
+            subtitle_label.set_selectable(True)
+            subtitle_label.set_wrap(True)
+            subtitle_label.set_xalign(0.0)
+            subtitle_label.set_text(subtitle)
+            subtitle_label.get_style_context().add_class("result-content")
             box.append(subtitle_label)
         
+        row.set_child(box)
+        self.results_list.append(row)
+
+    def _add_suggestion_row(self, s: Suggestion):
+        row = Gtk.ListBoxRow()
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+
+        title_label = Gtk.Label()
+        title_label.set_markup(f"<b>{Gtk.utils.escape(s.title)}</b>" if hasattr(Gtk, "utils") else f"<b>{s.title}</b>")
+        title_label.set_halign(Gtk.Align.START)
+        title_label.get_style_context().add_class("result-title")
+        box.append(title_label)
+
+        if s.subtitle:
+            subtitle_label = Gtk.Label()
+            subtitle_label.set_selectable(False)
+            subtitle_label.set_wrap(True)
+            subtitle_label.set_xalign(0.0)
+            subtitle_label.set_text(s.subtitle)
+            subtitle_label.get_style_context().add_class("result-content")
+            box.append(subtitle_label)
+
+        # Attach payload to the box for retrieval on activation
+        setattr(box, "payload", s.payload)
         row.set_child(box)
         self.results_list.append(row)
     
@@ -200,7 +298,34 @@ class OverlayWindow(Gtk.ApplicationWindow):
     
     def set_status(self, text: str):
         """Set status bar text."""
-        self.status_label.set_markup(f"<span size='small' alpha='60%'>{text}</span>")
+        suffix = f" • {self._active_app}" if self._active_app else ""
+        self.status_label.set_markup(f"<span size='small' alpha='60%'>{text}{suffix}</span>")
+
+    def _refresh_context(self):
+        """Update active application name (best-effort)."""
+        try:
+            app_name = self._detect_active_app()
+            if app_name:
+                self._active_app = app_name
+                # Update status subtly without overriding main message when idle
+                self.set_status("Ready")
+        except Exception:
+            pass
+        return True
+
+    def _detect_active_app(self) -> Optional[str]:
+        """Detect active window/app (X11 best-effort)."""
+        try:
+            import subprocess
+            # Try wmctrl (commonly available on X11)
+            out = subprocess.check_output(["bash", "-lc", "wmctrl -lp | awk 'NR==1{print $3}'"], stderr=subprocess.DEVNULL, text=True)
+            pid = out.strip()
+            if pid.isdigit():
+                cmd = subprocess.check_output(["bash", "-lc", f"ps -p {pid} -o comm="], stderr=subprocess.DEVNULL, text=True).strip()
+                return cmd
+        except Exception:
+            pass
+        return None
 
 
 class OverlayApplication(Gtk.Application):

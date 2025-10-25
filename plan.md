@@ -12,12 +12,12 @@
 
 **Last Updated**: October 25, 2025
 
-### Overall Status: Phase 2A (62.5% Complete)
+### Overall Status: Phase 2A (87.5% Complete)
 
 | Phase | Status | Progress | Completion Date |
 |-------|--------|----------|-----------------|
 | Phase 1: Foundation | ✅ Complete | 8/8 (100%) | October 2025 |
-| Phase 2A: Intelligence | 🚧 In Progress | 10/16 (62.5%) | In Progress |
+| Phase 2A: Intelligence | 🚧 In Progress | 14/16 (87.5%) | In Progress |
 | Phase 2B: Advanced Intelligence | ⏳ Planned | 0/4 (0%) | Future |
 | Phase 3: Advanced Features | ⏳ Planned | 0/5 (0%) | Future |
 | Phase 4: Optimization | ⏳ Planned | 0/4 (0%) | Future |
@@ -45,20 +45,19 @@
 
 ### In Progress
 
-- **GUI Overlay Assistant** (30% complete)
+- **GUI Overlay Assistant** (MVP complete)
   - Window and UI components ✅
-  - Global hotkey listener (Alt+Space) ⏳
-  - Fuzzy search ⏳
-  - LLM integration ⏳
-  - Context awareness ⏳
+  - Global hotkey listener (Alt+Space, X11) ✅
+  - Fuzzy search (rapidfuzz fallback) ✅
+  - LLM integration via NATS ✅
+  - Minimal context awareness (active app) ✅
 
 ### Next Priorities
 
-1. Complete GUI overlay (hotkey, search, actions)
-2. System tray integration
-3. Voice interface (STT/TTS)
-4. Vision service (OCR, screen understanding)
-5. Temporal intelligence (system history)
+1. System tray integration and desktop packaging
+2. Voice interface (STT/TTS)
+3. Vision service (OCR, screen understanding)
+4. Temporal intelligence (system history)
 
 For detailed progress, see: [PHASE2A_PROGRESS.md](PHASE2A_PROGRESS.md)
 

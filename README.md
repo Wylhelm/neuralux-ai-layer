@@ -104,6 +104,22 @@ aish
 - **Code**: Python, JavaScript, Java, C/C++, Go, Rust, and more
 - **Text**: Markdown, TXT, JSON, YAML, XML, HTML, CSS, SQL
 
+### Overlay Assistant (GUI)
+
+Install GTK bindings (Ubuntu/Debian):
+```bash
+sudo apt install -y python3-gi gir1.2-gtk-4.0 libgtk-4-1 libgtk-4-bin
+```
+
+Launch the overlay:
+```bash
+aish overlay
+# X11 hotkey (Alt+Space):
+aish overlay --hotkey
+```
+
+On Wayland, bind a desktop shortcut to run `aish overlay`.
+
 ### Monitor System Health
 
 ```bash
@@ -167,7 +183,7 @@ neuralux-ai-layer/
 - [x] One-command installation script
 - [x] Comprehensive documentation
 
-### Phase 2A - Intelligence 🚧 In Progress (7/15 tasks)
+### Phase 2A - Intelligence 🚧 In Progress (11/15 tasks)
 - [x] System health monitoring (CPU, memory, disk, network)
 - [x] Real-time metrics collection with psutil
 - [x] Time-series storage with DuckDB
@@ -176,11 +192,11 @@ neuralux-ai-layer/
 - [x] Beautiful terminal dashboard (`aish health`)
 - [x] Live monitoring mode (`aish health --watch`)
 - [ ] System tray integration
-- [ ] GUI overlay (Alt+Space assistant) - **In Progress**
-- [ ] Command palette with fuzzy search
-- [ ] Global hotkey listener
-- [ ] LLM integration in GUI
-- [ ] Screen context awareness
+- [x] GUI overlay (Alt+Space assistant)
+- [x] Command palette with fuzzy search
+- [x] Global hotkey listener (X11)
+- [x] LLM integration in GUI
+- [x] Screen context awareness (minimal)
 - [ ] Temporal intelligence (system history)
 - [ ] Documentation and testing
 

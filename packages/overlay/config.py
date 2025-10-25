@@ -11,6 +11,7 @@ class OverlayConfig(BaseSettings):
     window_width: int = 800
     window_height: int = 600
     window_opacity: float = 0.95
+    fullscreen: bool = False  # If true, maximize window and center content
     
     # Hotkey
     hotkey: str = "<Alt>space"  # GTK accelerator format

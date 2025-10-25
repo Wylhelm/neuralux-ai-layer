@@ -725,6 +725,117 @@ def health(watch: bool, interval: int):
     asyncio.run(run())
 
 
+@cli.command()
+@click.option("--hotkey", is_flag=True, help="Run hotkey daemon (X11 only) [documented fallback on Wayland]")
+def overlay(hotkey: bool):
+    """Launch the Neuralux GUI overlay."""
+    # Try to import GTK overlay components with a clear error if unavailable
+    try:
+        # Add packages/ to sys.path so we can import the overlay package
+        sys.path.insert(0, str(Path(__file__).parent.parent.parent))
+        from overlay.overlay_window import OverlayApplication
+        from overlay.config import OverlayConfig
+        from gi.repository import GLib  # type: ignore
+    except Exception as e:  # pragma: no cover - environment dependent
+        console.print("[red]Failed to load GTK4 overlay.[/red]")
+        console.print("[yellow]Ensure GTK4 bindings are installed:[/yellow]")
+        console.print("  sudo apt install python3-gi gir1.2-gtk-4.0")
+        console.print(f"Details: {e}")
+        sys.exit(1)
+
+    if hotkey:
+        # Try to start X11 hotkey listener (Wayland will be a no-op)
+        try:
+            from overlay.hotkey import X11HotkeyListener
+            listener = X11HotkeyListener(on_trigger=lambda: GLib.idle_add(lambda: app.window and app.window.toggle_visibility()))
+            listener.start()
+            console.print("[green]Hotkey:[/green] Alt+Space (X11). On Wayland, create a desktop shortcut to run 'aish overlay'.")
+        except Exception:
+            console.print("[yellow]Hotkey unavailable. Install python-xlib or use a DE shortcut to run 'aish overlay'.[/yellow]")
+
+    config = OverlayConfig()
+
+    # Async command handler that queries LLM and shows minimal status
+    async def handle_query(text: str):
+        shell = AIShell()
+        try:
+            if not await shell.connect():
+                return "Message bus not available"
+            if text.startswith("/search "):
+                query = text[len("/search "):].strip()
+                result = await shell.search_files(query)
+                if "error" in result:
+                    return result.get("error")
+                return {"_overlay_render": "file_search", "results": result.get("results", [])}
+            if text in ("/health", "/health summary"):
+                try:
+                    summary = await shell.message_bus.request("system.health.summary", {}, timeout=5.0)
+                    return {"_overlay_render": "health", "data": summary}
+                except Exception as e:
+                    return f"Health error: {e}"
+            response = await shell.ask_llm(text, mode="command")
+            return response
+        finally:
+            try:
+                await shell.disconnect()
+            except Exception:
+                pass
+
+    # Placeholder UI callback that offloads to asyncio in a thread
+    def on_command(text: str):
+        # Update status immediately
+        try:
+            if app.window is not None:
+                app.window.set_status(f"Processing: {text}")
+        except Exception:
+            pass
+
+        import threading
+        import asyncio as _asyncio
+
+        def _worker():
+            try:
+                result = _asyncio.run(handle_query(text))
+            except Exception as _e:  # pragma: no cover
+                result = f"Error: {_e}"
+            # Push a UI update back to the GTK thread
+            try:
+                def _update():
+                    if not app.window:
+                        return False
+                    app.window.clear_results()
+                    # If this is a special overlay command result, render accordingly
+                    if isinstance(result, dict) and result.get("_overlay_render") == "health":
+                        data = result.get("data", {})
+                        app.window.add_result("Health", f"Status: {data.get('status','unknown')} | CPU: {data.get('current_metrics',{}).get('cpu',{}).get('usage_percent',0):.1f}%")
+                    elif isinstance(result, dict) and result.get("_overlay_render") == "file_search":
+                        items = result.get("results", [])
+                        if not items:
+                            app.window.add_result("Files", "No results")
+                        else:
+                            for it in items[: app.window.config.max_results]:
+                                title = it.get("filename", "file")
+                                sub = it.get("file_path", "")
+                                app.window.add_result(title, sub)
+                    else:
+                        app.window.add_result("Result", result if isinstance(result, str) else str(result))
+                    app.window.set_status("Done")
+                    return False
+                GLib.idle_add(_update)
+            except Exception:
+                pass
+
+        threading.Thread(target=_worker, daemon=True).start()
+
+    app = OverlayApplication(config=config, on_command=on_command)
+
+    # Run the GTK application (blocks until closed)
+    try:
+        # Gtk.Application.run() expects argv or None
+        app.run(None)
+    except Exception as e:
+        console.print(f"[red]Overlay terminated with error:[/red] {e}")
+
 def main():
     """Main entry point."""
     cli()

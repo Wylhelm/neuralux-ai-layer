@@ -1,6 +1,6 @@
 # Phase 2A: Intelligence Layer - Progress Report
 
-**Status**: 🚧 In Progress (50% Complete - 8/16 tasks)  
+**Status**: 🚧 In Progress (87.5% Complete - 14/16 tasks)  
 **Last Updated**: October 25, 2025
 
 ---
@@ -234,9 +234,9 @@ Results: 3 relevant documents (16%, 15%, 14% match scores)
 
 ### GUI Overlay Assistant
 
-**Status**: 🚧 **FOUNDATION COMPLETE** (30% of overlay work)
+**Status**: ✅ **MVP COMPLETE**
 
-Started implementation of the GTK4-based overlay assistant with Alt+Space activation.
+GTK4-based overlay assistant with Alt+Space activation (X11), fuzzy search, LLM integration, and minimal context.
 
 #### Architecture
 
@@ -282,11 +282,23 @@ Started implementation of the GTK4-based overlay assistant with Alt+Space activa
   - Main overlay window with modern UI
   - Search entry with placeholder
   - Scrollable results list
-  - Status bar at bottom
-  - Catppuccin dark theme (modern, beautiful)
+  - Status bar at bottom with context
+  - Dark theme with improved contrast
   - Toggle visibility functionality
   - Result management (add/clear/select)
   - Keyboard shortcuts (Enter to execute, Esc to close)
+
+- **`hotkey.py`** ✅ - Global hotkey (X11)
+  - Alt+Space toggles overlay using XGrabKey
+  - Wayland: documented DE shortcut fallback
+
+- **`search.py`** ✅ - Fuzzy search
+  - rapidfuzz scoring with substring fallback
+  - Ranks built-in actions (Ask AI, Search files, Health)
+
+- **CLI integration (`aish overlay`)** ✅
+  - Launch overlay and optional `--hotkey` mode
+  - Async NATS calls to LLM, filesystem, health
 
 #### UI Components
 
@@ -311,30 +323,9 @@ Started implementation of the GTK4-based overlay assistant with Alt+Space activa
 
 #### Remaining Work
 
-**Hotkey Listener** (⏳ Priority 1):
-- Global hotkey capture (Alt+Space)
-- Wayland support (keyd or custom protocol)
-- X11 support (python-xlib)
-- Desktop environment compatibility
-
-**Fuzzy Search** (⏳ Priority 2):
-- Implement fuzzy matching algorithm
-- Filter and rank results
-- Update results list in real-time
-- Keyboard navigation (arrow keys)
-
-**Action Handlers** (⏳ Priority 3):
-- Command execution
-- LLM integration for natural language
-- File search integration
-- Health monitoring queries
-- System commands
-
-**Context Awareness** (⏳ Priority 4):
-- Detect active window
-- Get current application
-- Workspace/desktop information
-- Contextual suggestions
+- Wayland-friendly hotkey integration (documented shortcut for now)
+- System tray integration for quick toggle
+- Documentation polish and user testing
 
 ---
 
@@ -354,12 +345,12 @@ Started implementation of the GTK4-based overlay assistant with Alt+Space activa
 | GTK4 window | ✅ | overlay_window.py | packages/overlay/ |
 | Basic UI components | ✅ | overlay_window.py | packages/overlay/ |
 | Styling/theming | ✅ | overlay_window.py | packages/overlay/ |
-| Hotkey listener | ⏳ | TBD | packages/overlay/ |
-| Fuzzy search | ⏳ | TBD | packages/overlay/ |
-| LLM integration (GUI) | ⏳ | TBD | packages/overlay/ |
-| Context awareness | ⏳ | TBD | packages/overlay/ |
+| Hotkey listener | ✅ | hotkey.py | packages/overlay/ |
+| Fuzzy search | ✅ | search.py | packages/overlay/ |
+| LLM integration (GUI) | ✅ | aish overlay | packages/cli/aish/ |
+| Context awareness | ✅ | overlay_window.py | packages/overlay/ |
 
-**Progress**: 8/16 tasks complete (50%)
+**Progress**: 14/16 tasks complete (87.5%)
 
 ---
 

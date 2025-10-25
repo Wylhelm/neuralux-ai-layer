@@ -135,6 +135,8 @@ This document describes the current state of the Neuralux AI Layer implementatio
 Implemented:
 - `ai.llm.request` - LLM completion requests
 - `ai.llm.embed` - Embedding generation
+- `system.health.summary` - Current health snapshot and alerts
+- `system.file.search` - Semantic search requests
 
 Planned (from plan.md):
 - `ai.llm.stream` - Streaming completions
@@ -210,17 +212,13 @@ NeuroTuxLayer/
 
 ## Next Steps (From Plan)
 
-### Phase 1 Remaining
-- [ ] Semantic file search implementation
-- [ ] System command explanation enhancements
-- [ ] Model management UI
-- [ ] Ubuntu package (.deb)
+### Phase 2A (Remaining)
+- [ ] System tray integration and desktop packaging
+- [ ] Documentation polish and user testing
 
-### Phase 2 (Intelligence)
+### Phase 2B (Intelligence)
 - [ ] Vision service (OCR, screen understanding)
-- [ ] GUI overlay assistant (Alt+Space)
 - [ ] Temporal intelligence system
-- [ ] System health monitoring
 - [ ] Voice interface (STT/TTS)
 
 ### Phase 3 (Advanced Features)
