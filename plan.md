@@ -8,6 +8,60 @@
 **Recommended**: NVIDIA RTX 3090 or better (24GB VRAM)  
 **License**: Apache 2.0 with optional proprietary extensions
 
+## 📊 Development Progress
+
+**Last Updated**: October 25, 2025
+
+### Overall Status: Phase 2A (62.5% Complete)
+
+| Phase | Status | Progress | Completion Date |
+|-------|--------|----------|-----------------|
+| Phase 1: Foundation | ✅ Complete | 8/8 (100%) | October 2025 |
+| Phase 2A: Intelligence | 🚧 In Progress | 10/16 (62.5%) | In Progress |
+| Phase 2B: Advanced Intelligence | ⏳ Planned | 0/4 (0%) | Future |
+| Phase 3: Advanced Features | ⏳ Planned | 0/5 (0%) | Future |
+| Phase 4: Optimization | ⏳ Planned | 0/4 (0%) | Future |
+
+### Recently Completed (October 2025)
+
+**Phase 1 - Foundation** ✅
+- Natural language CLI interface (`aish`)
+- LLM service with llama.cpp + GPU support
+- Semantic file search with Qdrant
+- NATS message bus infrastructure
+- Docker Compose orchestration
+- One-command installation
+
+**Phase 2A - Partial** ✅
+- System health monitoring service (production ready)
+  - Real-time CPU, memory, disk, network metrics
+  - DuckDB time-series storage with 7/30/365 day retention
+  - Anomaly detection with smart thresholds
+  - Beautiful terminal dashboard (`aish health`)
+  - Live monitoring mode
+- Enhanced document support (ODT, ODS, XLSX, XLS, CSV)
+- Improved semantic search (query extraction, better scoring)
+- GUI overlay foundation (GTK4, theming, UI components)
+
+### In Progress
+
+- **GUI Overlay Assistant** (30% complete)
+  - Window and UI components ✅
+  - Global hotkey listener (Alt+Space) ⏳
+  - Fuzzy search ⏳
+  - LLM integration ⏳
+  - Context awareness ⏳
+
+### Next Priorities
+
+1. Complete GUI overlay (hotkey, search, actions)
+2. System tray integration
+3. Voice interface (STT/TTS)
+4. Vision service (OCR, screen understanding)
+5. Temporal intelligence (system history)
+
+For detailed progress, see: [PHASE2A_PROGRESS.md](PHASE2A_PROGRESS.md)
+
 ## Architecture Overview
 
 ### Core Design Principles
@@ -419,34 +473,78 @@ optimization:
 
 ## Implementation Phases
 
-### Phase 1: Foundation (Months 1-3)
+### Phase 1: Foundation ✅ COMPLETE
 ```yaml
+status: COMPLETE (October 2025)
 goals:
-  - Core message bus infrastructure
-  - Basic LLM service with llama.cpp
-  - CLI interface with natural language
-  - Semantic file search (local)
-  - System command explanation
+  - ✅ Core message bus infrastructure (NATS with JetStream)
+  - ✅ Basic LLM service with llama.cpp (GPU support)
+  - ✅ CLI interface with natural language (aish)
+  - ✅ Semantic file search (Qdrant vector store)
+  - ✅ System command explanation
+  - ✅ Document format support (PDF, DOCX, ODT, ODS, XLSX, CSV)
 deliverables:
-  - Ubuntu Noble .deb package
-  - Docker compose for services
-  - Basic documentation
-  - CLI tool: 'aish'
+  - ✅ Docker compose for services
+  - ✅ One-command installation script
+  - ✅ Comprehensive documentation
+  - ✅ CLI tool: 'aish' with multiple commands
+  - ✅ Test suite (22/22 passing)
+accomplishments:
+  - Natural language command interface with context awareness
+  - Semantic file search with content extraction
+  - Real-time command execution with safety confirmations
+  - Git-aware status display
+  - Fuzzy file search across multiple formats
+  - Beautiful Rich terminal UI
 ```
 
-### Phase 2: Intelligence (Months 4-6)
+### Phase 2A: Intelligence (In Progress) 🚧 62.5% Complete
 ```yaml
+status: IN PROGRESS (October 2025)
+completed:
+  - ✅ System health monitoring service
+    - Real-time metrics (CPU, memory, disk, network)
+    - DuckDB time-series storage
+    - Anomaly detection with configurable thresholds
+    - NATS API integration
+    - Terminal dashboard (aish health)
+    - Live monitoring mode (aish health --watch)
+  - ✅ Enhanced document support (ODT, ODS, Excel)
+  - ✅ Semantic search improvements (query extraction, scoring)
+  - ✅ GUI overlay foundation (GTK4 window, theming)
+in_progress:
+  - 🚧 GUI overlay assistant (Alt+Space)
+    - ✅ Window and UI components
+    - ⏳ Global hotkey listener
+    - ⏳ Fuzzy search implementation
+    - ⏳ LLM integration
+    - ⏳ Context awareness
+pending:
+  - ⏳ Vision and screen understanding
+  - ⏳ Temporal intelligence system
+  - ⏳ Voice interface (STT/TTS)
+deliverables:
+  - ✅ Health monitoring service (production ready)
+  - ✅ Enhanced CLI with health dashboard
+  - 🚧 GUI overlay (foundation complete)
+  - ⏳ Desktop integration package
+  - ⏳ Voice assistant daemon
+progress: 10/16 tasks (62.5%)
+```
+
+### Phase 2B: Advanced Intelligence (Future)
+```yaml
+status: PLANNED
 goals:
   - Vision and screen understanding
-  - GUI overlay assistant
-  - Temporal intelligence system
-  - System health monitoring
-  - Voice interface (STT/TTS)
+  - Voice interface (STT/TTS)  
+  - Temporal intelligence (system history)
+  - Enhanced automation
 deliverables:
-  - Desktop integration package
-  - Model management UI
-  - Performance profiler
+  - Vision service with OCR
   - Voice assistant daemon
+  - Temporal query system
+  - Advanced automation rules
 ```
 
 ### Phase 3: Advanced Features (Months 7-9)
