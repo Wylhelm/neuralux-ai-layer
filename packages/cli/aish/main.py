@@ -525,6 +525,18 @@ def status():
                     console.print("[yellow]⚠[/yellow] Filesystem service: Unexpected status")
         except:
             console.print("[red]✗[/red] Filesystem service: Not running")
+        
+        # Check health service
+        try:
+            import httpx
+            async with httpx.AsyncClient() as client:
+                response = await client.get("http://localhost:8004/", timeout=5.0)
+                if response.status_code == 200:
+                    console.print("[green]✓[/green] Health service: Running")
+                else:
+                    console.print("[yellow]⚠[/yellow] Health service: Unexpected status")
+        except:
+            console.print("[red]✗[/red] Health service: Not running")
     
     asyncio.run(run())
 
@@ -560,6 +572,155 @@ def index(directory, recursive):
                             console.print(f"  {error}")
             finally:
                 await shell.disconnect()
+    
+    asyncio.run(run())
+
+
+@cli.command()
+@click.option("--watch", is_flag=True, help="Continuously monitor health")
+@click.option("--interval", default=2, help="Update interval in seconds (with --watch)")
+def health(watch: bool, interval: int):
+    """Display system health metrics."""
+    from rich.table import Table
+    from rich.live import Live
+    from rich.layout import Layout
+    from rich.panel import Panel
+    import time
+    
+    async def run():
+        shell = AIShell()
+        if not await shell.connect():
+            return
+        
+        try:
+            def create_dashboard(data: dict):
+                """Create a dashboard layout from health data."""
+                layout = Layout()
+                layout.split_column(
+                    Layout(name="header", size=3),
+                    Layout(name="body"),
+                    Layout(name="footer", size=3)
+                )
+                
+                # Header with status
+                status_color = {"healthy": "green", "warning": "yellow", "critical": "red"}.get(
+                    data.get("status", "unknown"), "white"
+                )
+                layout["header"].update(
+                    Panel(
+                        f"[bold]{data.get('status', 'Unknown').upper()}[/bold]",
+                        style=status_color,
+                        title="System Health"
+                    )
+                )
+                
+                # Body with metrics
+                layout["body"].split_row(
+                    Layout(name="left"),
+                    Layout(name="right")
+                )
+                
+                # Left: CPU and Memory
+                metrics = data.get("current_metrics", {})
+                cpu = metrics.get("cpu", {})
+                memory = metrics.get("memory", {})
+                
+                cpu_table = Table(title="CPU", show_header=False, box=None)
+                cpu_table.add_row("Usage", f"{cpu.get('usage_percent', 0):.1f}%")
+                cpu_table.add_row("Load Avg", ", ".join([f"{x:.2f}" for x in cpu.get("load_average", [0, 0, 0])]))
+                
+                mem_table = Table(title="Memory", show_header=False, box=None)
+                mem_used_gb = memory.get("used", 0) / (1024**3)
+                mem_total_gb = memory.get("total", 1) / (1024**3)
+                mem_table.add_row("Usage", f"{memory.get('percent', 0):.1f}%")
+                mem_table.add_row("Used/Total", f"{mem_used_gb:.1f} / {mem_total_gb:.1f} GB")
+                
+                layout["left"].split_column(
+                    Layout(Panel(cpu_table)),
+                    Layout(Panel(mem_table))
+                )
+                
+                # Right: Disks and Top Processes
+                disks = metrics.get("disks", [])
+                disk_table = Table(title="Disks", show_header=True)
+                disk_table.add_column("Mount")
+                disk_table.add_column("Used")
+                disk_table.add_column("Free")
+                disk_table.add_column("Usage")
+                
+                for disk in disks[:3]:  # Show top 3
+                    used_gb = disk.get("used", 0) / (1024**3)
+                    free_gb = disk.get("free", 0) / (1024**3)
+                    percent = disk.get("percent", 0)
+                    color = "red" if percent > 90 else "yellow" if percent > 80 else "green"
+                    disk_table.add_row(
+                        disk.get("mountpoint", ""),
+                        f"{used_gb:.1f}GB",
+                        f"{free_gb:.1f}GB",
+                        f"[{color}]{percent:.1f}%[/{color}]"
+                    )
+                
+                procs = metrics.get("top_processes", [])
+                proc_table = Table(title="Top Processes", show_header=True)
+                proc_table.add_column("PID")
+                proc_table.add_column("Name")
+                proc_table.add_column("CPU%")
+                proc_table.add_column("Mem%")
+                
+                for proc in procs[:5]:  # Show top 5
+                    proc_table.add_row(
+                        str(proc.get("pid", "")),
+                        proc.get("name", "")[:20],
+                        f"{proc.get('cpu_percent', 0):.1f}",
+                        f"{proc.get('memory_percent', 0):.1f}"
+                    )
+                
+                layout["right"].split_column(
+                    Layout(Panel(disk_table)),
+                    Layout(Panel(proc_table))
+                )
+                
+                # Footer with alerts
+                alerts = data.get("alerts", [])
+                if alerts:
+                    alert_text = "\n".join([f"[{a.get('level', 'info')}]{a.get('message', '')}[/{a.get('level', 'info')}]" for a in alerts[:3]])
+                    layout["footer"].update(Panel(alert_text, title="Alerts", style="yellow"))
+                else:
+                    layout["footer"].update(Panel("[green]No alerts[/green]", title="Alerts"))
+                
+                return layout
+            
+            if watch:
+                # Continuous monitoring
+                with Live(console=console, refresh_per_second=1) as live:
+                    while True:
+                        response = await shell.message_bus.request(
+                            "system.health.summary",
+                            {},
+                            timeout=5.0
+                        )
+                        
+                        if "error" not in response:
+                            live.update(create_dashboard(response))
+                        
+                        time.sleep(interval)
+            else:
+                # Single snapshot
+                response = await shell.message_bus.request(
+                    "system.health.summary",
+                    {},
+                    timeout=5.0
+                )
+                
+                if "error" in response:
+                    console.print(f"[red]Error: {response['error']}[/red]")
+                    console.print("\n[yellow]Make sure the health service is running:[/yellow]")
+                    console.print("  cd services/health && python service.py &")
+                else:
+                    console.print(create_dashboard(response))
+        
+        finally:
+            await shell.disconnect()
     
     asyncio.run(run())
 
