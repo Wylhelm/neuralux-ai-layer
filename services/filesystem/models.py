@@ -15,6 +15,11 @@ class FileMetadata(BaseModel):
     modified_time: datetime
     created_time: Optional[datetime] = None
     mime_type: Optional[str] = None
+    
+    class Config:
+        json_encoders = {
+            datetime: lambda v: v.isoformat()
+        }
 
 
 class FileChunk(BaseModel):
@@ -32,7 +37,7 @@ class SearchQuery(BaseModel):
     query: str
     limit: int = 10
     file_types: Optional[List[str]] = None
-    min_score: float = 0.5
+    min_score: float = 0.1  # Lower threshold for better semantic search recall
 
 
 class SearchResult(BaseModel):

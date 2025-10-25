@@ -55,13 +55,17 @@ class FileSearcher:
         for hit in search_results:
             payload = hit.payload
             
+            # Parse datetime from ISO format string
+            from datetime import datetime
+            modified_time = datetime.fromisoformat(payload["modified_time"])
+            
             # Create metadata
             metadata = FileMetadata(
                 path=payload["file_path"],
                 filename=payload["filename"],
                 extension=payload["extension"],
                 size_bytes=payload["size_bytes"],
-                modified_time=payload["modified_time"],
+                modified_time=modified_time,
                 mime_type=payload.get("mime_type"),
             )
             
@@ -135,12 +139,15 @@ class FileSearcher:
             
             seen_files.add(hit_file_path)
             
+            # Parse datetime from ISO format string
+            modified_time = datetime.fromisoformat(payload["modified_time"])
+            
             metadata = FileMetadata(
                 path=hit_file_path,
                 filename=payload["filename"],
                 extension=payload["extension"],
                 size_bytes=payload["size_bytes"],
-                modified_time=payload["modified_time"],
+                modified_time=modified_time,
                 mime_type=payload.get("mime_type"),
             )
             

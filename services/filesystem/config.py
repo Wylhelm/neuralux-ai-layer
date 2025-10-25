@@ -50,7 +50,7 @@ class FileSystemServiceConfig(BaseSettings):
     document_extensions: List[str] = [
         ".pdf", ".docx", ".doc", ".odt",
         ".pptx", ".ppt", ".odp",
-        ".xlsx", ".xls", ".ods",
+        ".xlsx", ".xls", ".ods", ".csv",
     ]
     
     # Limits

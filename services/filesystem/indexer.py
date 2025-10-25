@@ -105,7 +105,72 @@ class FileIndexer:
                     logger.warning("python-docx not installed, skipping DOCX", file=str(file_path))
                     return None
             
-            # Other document types would go here
+            # ODT files (LibreOffice Writer)
+            elif ext == '.odt':
+                try:
+                    from odf import text, teletype
+                    from odf.opendocument import load
+                    doc = load(file_path)
+                    paragraphs = []
+                    for paragraph in doc.getElementsByType(text.P):
+                        paragraphs.append(teletype.extractText(paragraph))
+                    return '\n\n'.join(paragraphs)
+                except ImportError:
+                    logger.warning("odfpy not installed, skipping ODT", file=str(file_path))
+                    return None
+            
+            # ODS files (LibreOffice Calc)
+            elif ext == '.ods':
+                try:
+                    from odf.opendocument import load
+                    from odf.table import Table, TableRow, TableCell
+                    from odf import teletype
+                    doc = load(file_path)
+                    text_parts = []
+                    for table in doc.getElementsByType(Table):
+                        for row in table.getElementsByType(TableRow):
+                            row_data = []
+                            for cell in row.getElementsByType(TableCell):
+                                cell_text = teletype.extractText(cell)
+                                if cell_text:
+                                    row_data.append(cell_text)
+                            if row_data:
+                                text_parts.append('\t'.join(row_data))
+                    return '\n'.join(text_parts)
+                except ImportError:
+                    logger.warning("odfpy not installed, skipping ODS", file=str(file_path))
+                    return None
+            
+            # XLSX/XLS files (Excel)
+            elif ext in ['.xlsx', '.xls']:
+                try:
+                    from openpyxl import load_workbook
+                    wb = load_workbook(file_path, read_only=True, data_only=True)
+                    text_parts = []
+                    for sheet in wb.worksheets:
+                        text_parts.append(f"Sheet: {sheet.title}")
+                        for row in sheet.iter_rows(values_only=True):
+                            row_data = [str(cell) for cell in row if cell is not None]
+                            if row_data:
+                                text_parts.append('\t'.join(row_data))
+                    return '\n'.join(text_parts)
+                except ImportError:
+                    logger.warning("openpyxl not installed, skipping Excel", file=str(file_path))
+                    return None
+            
+            # CSV files
+            elif ext == '.csv':
+                try:
+                    import csv
+                    with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+                        reader = csv.reader(f)
+                        rows = ['\t'.join(row) for row in reader]
+                        return '\n'.join(rows)
+                except Exception as e:
+                    logger.error("Error reading CSV", file=str(file_path), error=str(e))
+                    return None
+            
+            # Other document types
             else:
                 return None
                 

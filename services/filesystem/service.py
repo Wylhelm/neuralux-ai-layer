@@ -112,7 +112,7 @@ class FileSystemService:
         try:
             query = SearchQuery(**request_data)
             response = self.searcher.search(query)
-            return response.model_dump()
+            return response.model_dump(mode='json')
         except Exception as e:
             logger.error("Message bus search failed", error=str(e))
             return {"error": str(e)}

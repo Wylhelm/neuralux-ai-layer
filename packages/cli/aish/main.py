@@ -200,7 +200,14 @@ Current context:
                     continue
                 
                 # Detect file search queries (semantic)
-                search_keywords = ["find files", "search files", "locate files", "files about", "documents about", "files containing"]
+                search_keywords = [
+                    "find files", "search files", "locate files", 
+                    "files about", "files containing", "files with",
+                    "find document", "search document", "locate document",
+                    "document about", "document containing", "document with",
+                    "find the document", "find the file",
+                    "documents about", "documents containing",
+                ]
                 is_search_query = any(keyword in user_input.lower() for keyword in search_keywords)
                 
                 if is_search_query:
@@ -250,10 +257,36 @@ Current context:
         console.print("\n[bold]Explanation:[/bold]")
         console.print(Panel(md, border_style="blue"))
     
+    def _extract_search_query(self, query: str) -> str:
+        """Extract the actual search terms from a natural language query."""
+        import re
+        
+        # Remove common search command phrases
+        patterns = [
+            r'^find\s+(the\s+)?(file|files|document|documents)\s+(about|containing|with|on)\s+',
+            r'^search\s+(for\s+)?(file|files|document|documents)\s+(about|containing|with|on)\s+',
+            r'^locate\s+(the\s+)?(file|files|document|documents)\s+(about|containing|with|on)\s+',
+            r'^(find|search|locate)\s+(the\s+)?(file|files|document|documents)\s+',
+            r'^(document|documents|file|files)\s+(about|containing|with|on)\s+',
+        ]
+        
+        cleaned = query.lower().strip()
+        for pattern in patterns:
+            cleaned = re.sub(pattern, '', cleaned, flags=re.IGNORECASE)
+        
+        # If we removed everything, use the original query
+        if not cleaned or len(cleaned) < 2:
+            return query
+        
+        return cleaned.strip()
+    
     async def _search_files_interactive(self, query: str):
         """Search files and display results interactively."""
-        with console.status(f"[bold yellow]Searching for: {query}...[/bold yellow]"):
-            result = await self.search_files(query)
+        # Extract the actual search terms from natural language
+        extracted_query = self._extract_search_query(query)
+        
+        with console.status(f"[bold yellow]Searching for: {extracted_query}...[/bold yellow]"):
+            result = await self.search_files(extracted_query)
         
         if "error" in result:
             error = result["error"]
@@ -271,7 +304,7 @@ Current context:
         results = result.get("results", [])
         
         if not results:
-            console.print(f"\n[yellow]No files found matching: {query}[/yellow]")
+            console.print(f"\n[yellow]No files found matching: {extracted_query}[/yellow]")
             console.print("\n[bold]Tips:[/bold]")
             console.print("- Make sure files are indexed: aish index ~/path/to/directory")
             console.print("- Try different search terms")
@@ -364,18 +397,23 @@ Current context:
 - `/explain tar -xzf archive.tar.gz`
 - `/explain ps aux | grep python`
 
-**Search files (semantic):**
-- "find files about machine learning"
-- "search files containing python code"
-- `/search documents about AI"
+**Search files by content (semantic search):**
+- "find the document about Claude"
+- "document containing gemini"
+- "search files with budget information"
+- `/search python code examples`
+- `/search machine learning notes`
+
+**Note:** For content search, use phrases like "document about", "document containing", 
+or use `/search` directly. Regular "find" commands search by filename.
 
 ## Tips
 
-1. Be specific about what you want
-2. Commands are shown before execution for safety
-3. Use `/explain` to understand complex commands
-4. Context-aware: knows your current directory and git status
-5. Index files with: aish index ~/Documents
+1. **Index first:** Run `aish index ~/Documents` before searching content
+2. Be specific about what you want
+3. Commands are shown before execution for safety
+4. Use `/explain` to understand complex commands
+5. Context-aware: knows your current directory and git status
 """
         console.print(Markdown(help_text))
 

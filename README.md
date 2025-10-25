@@ -96,6 +96,12 @@ aish
 > "locate documents about AI"
 ```
 
+**Supported File Formats:**
+- **Documents**: PDF, DOCX, ODT (LibreOffice Writer)
+- **Spreadsheets**: XLSX, XLS, ODS (LibreOffice Calc), CSV
+- **Code**: Python, JavaScript, Java, C/C++, Go, Rust, and more
+- **Text**: Markdown, TXT, JSON, YAML, XML, HTML, CSS, SQL
+
 ## Project Structure
 
 ```
