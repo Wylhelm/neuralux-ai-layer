@@ -12,13 +12,13 @@
 
 **Last Updated**: October 25, 2025
 
-### Overall Status: Phase 2A (87.5% Complete)
+### Overall Status: Phase 2A (93.8% Complete)
 
 | Phase | Status | Progress | Completion Date |
 |-------|--------|----------|-----------------|
 | Phase 1: Foundation | ✅ Complete | 8/8 (100%) | October 2025 |
-| Phase 2A: Intelligence | 🚧 In Progress | 14/16 (87.5%) | In Progress |
-| Phase 2B: Advanced Intelligence | ⏳ Planned | 0/4 (0%) | Future |
+| Phase 2A: Intelligence | 🚧 In Progress | 15/16 (93.8%) | In Progress |
+| Phase 2B: Advanced Intelligence | 🚧 In Progress | 1/4 (25%) | In Progress |
 | Phase 3: Advanced Features | ⏳ Planned | 0/5 (0%) | Future |
 | Phase 4: Optimization | ⏳ Planned | 0/4 (0%) | Future |
 
@@ -498,7 +498,7 @@ accomplishments:
   - Beautiful Rich terminal UI
 ```
 
-### Phase 2A: Intelligence (In Progress) 🚧 87.5% Complete
+### Phase 2A: Intelligence (In Progress) 🚧 93.8% Complete
 ```yaml
 status: IN PROGRESS (October 2025)
 completed:
@@ -519,25 +519,26 @@ completed:
     - ✅ LLM integration
     - ✅ Minimal context awareness
 pending:
-  - ⏳ System tray integration and desktop packaging
+  - ⏳ Desktop packaging
   - ⏳ Temporal intelligence system
 deliverables:
   - ✅ Health monitoring service (production ready)
   - ✅ Enhanced CLI with health dashboard
   - ✅ GUI overlay (MVP complete)
   - ⏳ Desktop integration package (tray + .desktop)
-progress: 14/16 tasks (87.5%)
+progress: 15/16 tasks (93.8%)
 ```
 
-### Phase 2B: Advanced Intelligence (Future)
+### Phase 2B: Advanced Intelligence (In Progress)
 ```yaml
-status: PLANNED
+status: IN PROGRESS
 goals:
   - Vision and screen understanding
   - Voice interface (STT/TTS)  
   - Temporal intelligence (system history)
   - Enhanced automation
 deliverables:
+  - Vision service skeleton with OCR endpoint and NATS stubs ✅
   - Vision service with OCR
   - Voice assistant daemon
   - Temporal query system

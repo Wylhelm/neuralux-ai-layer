@@ -65,6 +65,7 @@ wget https://huggingface.co/bartowski/Llama-3.2-3B-Instruct-GGUF/resolve/main/Ll
 cd services/llm && python service.py &
 cd services/filesystem && python service.py &
 cd services/health && python service.py &
+cd services/vision && python service.py &
 ```
 
 ### First Commands
@@ -239,7 +240,7 @@ neuralux-ai-layer/
 - [x] One-command installation script
 - [x] Comprehensive documentation
 
-### Phase 2A - Intelligence 🚧 In Progress (14/16 tasks)
+### Phase 2A - Intelligence 🚧 In Progress (15/16 tasks)
 - [x] System health monitoring (CPU, memory, disk, network)
 - [x] Real-time metrics collection with psutil
 - [x] Time-series storage with DuckDB

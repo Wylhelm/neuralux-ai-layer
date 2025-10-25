@@ -41,6 +41,7 @@ make test                    # Run all tests via Makefile
 | Qdrant HTTP | `http://localhost:6333` | Vector DB |
 | Qdrant gRPC | `localhost:6334` | Vector DB |
 | LLM Service | `http://localhost:8000` | AI API |
+| Vision Service | `http://localhost:8005` | OCR / vision API |
 
 ## 🔧 Common Tasks
 
