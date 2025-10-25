@@ -167,6 +167,7 @@ Current context:
             "Natural language command interface\n\n"
             "Commands:\n"
             "  /explain <command> - Explain a command\n"
+            "  /search <query> - Search files\n"
             "  /help - Show help\n"
             "  /exit - Exit the shell\n"
             "  Ctrl+C - Cancel current operation",
@@ -363,12 +364,18 @@ Current context:
 - `/explain tar -xzf archive.tar.gz`
 - `/explain ps aux | grep python`
 
+**Search files (semantic):**
+- "find files about machine learning"
+- "search files containing python code"
+- `/search documents about AI"
+
 ## Tips
 
 1. Be specific about what you want
 2. Commands are shown before execution for safety
 3. Use `/explain` to understand complex commands
 4. Context-aware: knows your current directory and git status
+5. Index files with: aish index ~/Documents
 """
         console.print(Markdown(help_text))
 
