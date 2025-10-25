@@ -13,7 +13,7 @@ echo ""
 
 # Stop infrastructure services
 echo "📦 Stopping infrastructure services..."
-docker-compose down
+docker compose down
 
 # Check for running LLM service
 LLM_PID=$(pgrep -f "python.*service.py" || true)

@@ -19,7 +19,7 @@ if ! command -v docker &> /dev/null; then
 fi
 
 # Check if Docker Compose is installed
-if ! command -v docker-compose &> /dev/null; then
+if ! docker compose version &> /dev/null; then
     echo "❌ Error: Docker Compose is not installed"
     echo "Please install Docker Compose: https://docs.docker.com/compose/install/"
     exit 1
@@ -27,7 +27,7 @@ fi
 
 # Start infrastructure services
 echo "📦 Starting infrastructure services..."
-docker-compose up -d
+docker compose up -d
 
 # Wait for services to be ready
 echo "⏳ Waiting for services to initialize..."
@@ -64,5 +64,5 @@ echo "Or run in background:"
 echo "  cd services/llm && nohup python service.py > llm-service.log 2>&1 &"
 echo ""
 echo "View logs:"
-echo "  docker-compose logs -f"
+echo "  docker compose logs -f"
 

@@ -35,21 +35,21 @@ install-dev: install
 
 start:
 	@echo "Starting Neuralux services..."
-	docker-compose up -d
+	docker compose up -d
 	@echo "Waiting for services to be ready..."
 	@sleep 5
 	@make status
 
 stop:
 	@echo "Stopping Neuralux services..."
-	docker-compose down
+	docker compose down
 
 restart: stop start
 
 status:
 	@echo "Neuralux Service Status:"
 	@echo ""
-	@docker-compose ps
+	@docker compose ps
 	@echo ""
 	@echo "Message Bus:"
 	@curl -s http://localhost:8222/varz | grep -q "server_id" && echo "✓ NATS is running" || echo "✗ NATS is not running"
@@ -59,7 +59,7 @@ status:
 	@curl -s http://localhost:6333/healthz | grep -q "ok" && echo "✓ Qdrant is running" || echo "✗ Qdrant is not running"
 
 logs:
-	docker-compose logs -f
+	docker compose logs -f
 
 start-llm:
 	@echo "Starting LLM service..."
