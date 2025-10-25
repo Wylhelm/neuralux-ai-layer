@@ -8,6 +8,7 @@ Neuralux AI Layer integrates advanced AI capabilities directly into your Linux s
 - ✅ **Natural language command interface** - Talk to your system naturally
 - ✅ **Semantic file search** - Find files by content, not just names
 - ✅ **Intelligent command generation** - AI suggests safe, correct commands
+- ✅ **System health monitoring** - Real-time metrics with anomaly detection
 - 🚧 Voice, gesture, and GUI interactions (Phase 2)
 - ✅ **Privacy-first, local-first processing** - Your data stays on your machine
 
@@ -29,7 +30,7 @@ Neuralux AI Layer integrates advanced AI capabilities directly into your Linux s
 Neuralux uses a microservices architecture with:
 - **Message Bus**: NATS.io for inter-service communication
 - **AI Services**: LLM, Vision, Audio processing
-- **System Integration**: File system intelligence, process management
+- **System Integration**: File system intelligence, health monitoring, process management
 - **User Interfaces**: CLI, GUI, Voice, Gesture
 
 ## Quick Start
@@ -63,6 +64,7 @@ wget https://huggingface.co/bartowski/Llama-3.2-3B-Instruct-GGUF/resolve/main/Ll
 # Start services
 cd services/llm && python service.py &
 cd services/filesystem && python service.py &
+cd services/health && python service.py &
 ```
 
 ### First Commands
@@ -102,47 +104,89 @@ aish
 - **Code**: Python, JavaScript, Java, C/C++, Go, Rust, and more
 - **Text**: Markdown, TXT, JSON, YAML, XML, HTML, CSS, SQL
 
+### Monitor System Health
+
+```bash
+# View current system health
+aish health
+
+# Live monitoring dashboard (updates every 2 seconds)
+aish health --watch
+
+# Check service status
+aish status
+```
+
+**Health Metrics:**
+- **CPU**: Usage %, per-core stats, load averages
+- **Memory**: RAM and swap usage with GB breakdown
+- **Disk**: Usage for all partitions (auto-filters snap mounts)
+- **Network**: Bytes sent/received, active connections
+- **Processes**: Top 5 by CPU usage
+- **Alerts**: Real-time warnings and critical alerts
+
+**Alert Thresholds:**
+- CPU: Warning @ 80%, Critical @ 95%
+- Memory: Warning @ 85%, Critical @ 95%
+- Disk: Warning @ 80%, Critical @ 90%
+
 ## Project Structure
 
 ```
 neuralux-ai-layer/
 ├── services/           # Core microservices
 │   ├── llm/           # Language model service
-│   ├── vision/        # Computer vision service
-│   ├── audio/         # Audio processing service
-│   ├── filesystem/    # Semantic file system
-│   └── system/        # System intelligence
+│   ├── filesystem/    # Semantic file search
+│   ├── health/        # System health monitoring
+│   ├── vision/        # Computer vision (Phase 2)
+│   ├── audio/         # Audio processing (Phase 2)
+│   └── system/        # System intelligence (Phase 2)
 ├── packages/          # Installable packages
-│   ├── cli/          # Command line interface
+│   ├── cli/          # Command line interface (aish)
 │   ├── common/       # Shared utilities
-│   └── sdk/          # Plugin SDK
+│   └── sdk/          # Plugin SDK (Phase 3)
 ├── infra/            # Infrastructure configs
 │   ├── docker/       # Docker configurations
 │   └── systemd/      # Service files
+├── data/             # Service databases
 └── docs/             # Documentation
 
 ```
 
 ## Development Status
 
-**Current Phase**: ✅ Phase 1 Complete!
+**Current Phase**: 🚧 Phase 2A - Intelligence (In Progress)
 
-### Completed Features
+### Phase 1 - Foundation ✅ Complete
 - [x] Message bus infrastructure (NATS with JetStream)
 - [x] LLM service (llama.cpp backend with GPU support)
 - [x] CLI interface (aish - natural language commands)
 - [x] Semantic file search (vector-based content search)
 - [x] Docker Compose orchestration
 - [x] Configuration management
-- [x] Test suite (22/22 passing)
 - [x] One-command installation script
 - [x] Comprehensive documentation
 
-### Phase 2 (Next)
-- [ ] Vision service (OCR, screen understanding)
-- [ ] GUI overlay (Alt+Space assistant)
-- [ ] Voice interface (STT/TTS)
+### Phase 2A - Intelligence 🚧 In Progress (7/15 tasks)
+- [x] System health monitoring (CPU, memory, disk, network)
+- [x] Real-time metrics collection with psutil
+- [x] Time-series storage with DuckDB
+- [x] Anomaly detection and alerting
+- [x] NATS API endpoints for health queries
+- [x] Beautiful terminal dashboard (`aish health`)
+- [x] Live monitoring mode (`aish health --watch`)
+- [ ] System tray integration
+- [ ] GUI overlay (Alt+Space assistant) - **In Progress**
+- [ ] Command palette with fuzzy search
+- [ ] Global hotkey listener
+- [ ] LLM integration in GUI
+- [ ] Screen context awareness
 - [ ] Temporal intelligence (system history)
+- [ ] Documentation and testing
+
+### Phase 2B - Advanced Intelligence (Future)
+- [ ] Vision service (OCR, screen understanding)
+- [ ] Voice interface (STT/TTS)
 - [ ] Enhanced automation
 
 ## License
