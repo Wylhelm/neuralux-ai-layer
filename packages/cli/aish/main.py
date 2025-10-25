@@ -747,9 +747,13 @@ def overlay(hotkey: bool):
         # Try to start X11 hotkey listener (Wayland will be a no-op)
         try:
             from overlay.hotkey import X11HotkeyListener
-            listener = X11HotkeyListener(on_trigger=lambda: GLib.idle_add(lambda: app.window and app.window.toggle_visibility()))
+            listener = X11HotkeyListener(
+                on_trigger=lambda: GLib.idle_add(lambda: app.window and app.window.toggle_visibility()),
+                hotkey=config.hotkey,
+            )
             listener.start()
-            console.print("[green]Hotkey:[/green] Alt+Space (X11). On Wayland, create a desktop shortcut to run 'aish overlay'.")
+            combo = "Ctrl+Space" if "Control" in config.hotkey or "control" in config.hotkey else "Alt+Space"
+            console.print(f"[green]Hotkey:[/green] {combo} (X11). On Wayland, create a desktop shortcut to run 'aish overlay'.")
         except Exception:
             console.print("[yellow]Hotkey unavailable. Install python-xlib or use a DE shortcut to run 'aish overlay'.[/yellow]")
 

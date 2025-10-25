@@ -14,8 +14,9 @@ from typing import Callable, Optional
 class X11HotkeyListener:
     """Listen for Alt+Space globally using Xlib on X11 sessions."""
 
-    def __init__(self, on_trigger: Callable[[], None]):
+    def __init__(self, on_trigger: Callable[[], None], hotkey: str = "<Control>space"):
         self.on_trigger = on_trigger
+        self.hotkey = hotkey
         self._thread: Optional[threading.Thread] = None
         self._stop = threading.Event()
 
@@ -42,8 +43,18 @@ class X11HotkeyListener:
         try:
             d = display.Display()
             root = d.screen().root
-            space_keycode = d.keysym_to_keycode(XK.string_to_keysym("space"))
-            mod_mask = X.Mod1Mask  # Alt
+            # Parse hotkey string (very small subset: <Control>space or <Alt>space)
+            key_name = "space"
+            mod_mask = 0
+            hk = self.hotkey.lower()
+            if "control" in hk:
+                mod_mask |= X.ControlMask
+            if "alt" in hk:
+                mod_mask |= X.Mod1Mask
+            if "space" in hk:
+                key_name = "space"
+            # Map to keycode
+            space_keycode = d.keysym_to_keycode(XK.string_to_keysym(key_name))
 
             # Attempt a couple of grabs (with/without NumLock/CapsLock)
             for lock_mask in (0, X.LockMask, X.Mod2Mask, X.LockMask | X.Mod2Mask):

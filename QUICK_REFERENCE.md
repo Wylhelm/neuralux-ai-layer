@@ -85,7 +85,7 @@ aish status                              # Check services
 ### Overlay
 ```bash
 aish overlay                 # Launch GUI overlay (GTK4)
-aish overlay --hotkey        # Enable Alt+Space on X11
+aish overlay --hotkey        # Enable Ctrl+Space (default) on X11
 ```
 
 ## 📁 Important Files

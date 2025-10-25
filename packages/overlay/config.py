@@ -14,7 +14,7 @@ class OverlayConfig(BaseSettings):
     fullscreen: bool = False  # If true, maximize window and center content
     
     # Hotkey
-    hotkey: str = "<Alt>space"  # GTK accelerator format
+    hotkey: str = "<Control>space"  # GTK/X11 accelerator format (default avoids Alt+Space conflict)
     
     # Appearance
     theme: str = "dark"  # dark or light

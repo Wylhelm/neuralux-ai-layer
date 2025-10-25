@@ -114,7 +114,7 @@ sudo apt install -y python3-gi gir1.2-gtk-4.0 libgtk-4-1 libgtk-4-bin
 Launch the overlay:
 ```bash
 aish overlay
-# X11 hotkey (Alt+Space):
+# X11 hotkey (Ctrl+Space by default):
 aish overlay --hotkey
 ```
 

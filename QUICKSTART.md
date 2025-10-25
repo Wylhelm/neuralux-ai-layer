@@ -108,7 +108,7 @@ aish> /explain ps aux | grep python
 
 ```bash
 aish overlay
-# X11 hotkey (Alt+Space):
+# X11 hotkey (Ctrl+Space by default):
 aish overlay --hotkey
 ```
 
