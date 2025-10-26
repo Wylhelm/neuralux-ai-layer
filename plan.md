@@ -60,9 +60,9 @@
 
 ### Next Priorities
 
-1. Voice interface (STT/TTS)
-2. Vision service (OCR complete; screen understanding next)
-3. Temporal intelligence (system history)
+1. Vision screen understanding (layouts, elements, objects)
+2. Temporal intelligence (system history)
+3. Streaming LLM + session persistence
 
 For detailed progress, see: [PHASE2A_PROGRESS.md](PHASE2A_PROGRESS.md)
 
