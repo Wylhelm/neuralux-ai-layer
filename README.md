@@ -48,8 +48,8 @@ Or manual installation:
 git clone https://github.com/Wylhelm/neuralux-ai-layer
 cd neuralux-ai-layer
 
-# Start core services
-docker compose up -d
+# Start everything (infra + Python services)
+make start-all
 
 # Install Python dependencies
 pip install -r requirements.txt
@@ -61,11 +61,8 @@ mkdir -p models
 wget https://huggingface.co/bartowski/Llama-3.2-3B-Instruct-GGUF/resolve/main/Llama-3.2-3B-Instruct-Q4_K_M.gguf \
   -O models/llama-3.2-3b-instruct-q4_k_m.gguf
 
-# Start services
-cd services/llm && python service.py &
-cd services/filesystem && python service.py &
-cd services/health && python service.py &
-cd services/vision && python service.py &
+# Optional: start the GUI overlay in background (with tray)
+make overlay
 ```
 
 ### First Commands
@@ -115,10 +112,14 @@ sudo apt install -y python3-gi gir1.2-gtk-4.0 libgtk-4-1 libgtk-4-bin
 Launch the overlay:
 ```bash
 aish overlay
-# X11 hotkey (Alt+Space by default):
+# X11 hotkey (Alt+Space or Ctrl+Space based on config):
 aish overlay --hotkey
 # Tray icon (quick toggle from system tray):
 aish overlay --tray
+# Control an existing instance (Wayland-friendly):
+aish overlay --toggle   # Toggle
+aish overlay --show     # Show/focus
+aish overlay --hide     # Hide
 ```
 
 On Wayland, bind a desktop shortcut to run `aish overlay`. Tray works if AppIndicator is available.
@@ -137,29 +138,17 @@ Install AppIndicator support (Ubuntu/Debian) for the tray icon:
 sudo apt install -y gir1.2-ayatanaappindicator3-0.1 libayatana-appindicator3-1
 ```
 
-Create an application launcher:
+Create an application launcher via Makefile:
 ```bash
-mkdir -p ~/.local/share/applications
-cat > ~/.local/share/applications/neuralux-overlay.desktop << 'EOF'
-[Desktop Entry]
-Name=Neuralux Overlay
-Comment=Open the Neuralux assistant overlay
-Exec=aish overlay
-Terminal=false
-Type=Application
-Icon=utilities-terminal
-Categories=Utility;
-StartupNotify=false
-EOF
+make desktop
 ```
 
 Autostart on login (optional):
 ```bash
-mkdir -p ~/.config/autostart
-cp ~/.local/share/applications/neuralux-overlay.desktop ~/.config/autostart/
+make autostart
 ```
 
-Tip: On Wayland, use the launcher entry or bind a DE keyboard shortcut to run `aish overlay`.
+Tip: On Wayland, use the launcher entry or bind a DE keyboard shortcut to run `aish overlay --toggle`.
 You can also enable the tray by default by setting an environment variable:
 ```bash
 export OVERLAY_ENABLE_TRAY=true

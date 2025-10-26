@@ -728,7 +728,10 @@ def health(watch: bool, interval: int):
 @cli.command()
 @click.option("--hotkey", is_flag=True, help="Run hotkey daemon (X11 only) [documented fallback on Wayland]")
 @click.option("--tray", is_flag=True, help="Show system tray icon for quick toggle (requires Ayatana/AppIndicator)")
-def overlay(hotkey: bool, tray: bool):
+@click.option("--toggle", is_flag=True, help="Send a toggle signal to an existing overlay instance and exit")
+@click.option("--show", is_flag=True, help="Send a show signal to an existing overlay instance and exit")
+@click.option("--hide", is_flag=True, help="Send a hide signal to an existing overlay instance and exit")
+def overlay(hotkey: bool, tray: bool, toggle: bool, show: bool, hide: bool):
     """Launch the Neuralux GUI overlay."""
     # Try to import GTK overlay components with a clear error if unavailable
     try:
@@ -747,6 +750,23 @@ def overlay(hotkey: bool, tray: bool):
 
     # Create config before using it in hotkey setup
     config = OverlayConfig()
+
+    # If control flags are provided, send the appropriate message and exit.
+    if toggle or show or hide:
+        async def _send_signal():
+            bus = MessageBusClient(NeuraluxConfig())
+            await bus.connect()
+            try:
+                subject = (
+                    "ui.overlay.toggle" if toggle else "ui.overlay.show" if show else "ui.overlay.hide"
+                )
+                await bus.publish(subject, {})
+                console.print(f"[green]Sent overlay signal:[/green] {subject}")
+            finally:
+                await bus.disconnect()
+
+        asyncio.run(_send_signal())
+        return
 
     if hotkey:
         # Try to start X11 hotkey listener (Wayland will be a no-op)
@@ -906,6 +926,18 @@ def overlay(hotkey: bool, tray: bool):
                         except Exception:
                             pass
 
+                    async def _on_show(_msg):
+                        try:
+                            GLib.idle_add(lambda: (app.window and getattr(app.window, "show_overlay", app.window.present)()))
+                        except Exception:
+                            pass
+
+                    async def _on_hide(_msg):
+                        try:
+                            GLib.idle_add(lambda: (app.window and getattr(app.window, "hide_overlay", app.window.hide)()))
+                        except Exception:
+                            pass
+
                     async def _on_quit(_msg):
                         try:
                             from gi.repository import Gtk as _Gtk  # type: ignore
@@ -915,6 +947,8 @@ def overlay(hotkey: bool, tray: bool):
                             pass
 
                     await bus.subscribe("ui.overlay.toggle", _on_toggle)
+                    await bus.subscribe("ui.overlay.show", _on_show)
+                    await bus.subscribe("ui.overlay.hide", _on_hide)
                     await bus.subscribe("ui.overlay.quit", _on_quit)
 
                     # Keep the task alive

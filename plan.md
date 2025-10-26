@@ -12,12 +12,12 @@
 
 **Last Updated**: October 25, 2025
 
-### Overall Status: Phase 2A (93.8% Complete)
+### Overall Status: Phase 2A (MVP complete + desktop packaging)
 
 | Phase | Status | Progress | Completion Date |
 |-------|--------|----------|-----------------|
 | Phase 1: Foundation | ✅ Complete | 8/8 (100%) | October 2025 |
-| Phase 2A: Intelligence | 🚧 In Progress | 15/16 (93.8%) | In Progress |
+| Phase 2A: Intelligence | 🚧 In Progress | MVP + Desktop packaging | In Progress |
 | Phase 2B: Advanced Intelligence | 🚧 In Progress | 1/4 (25%) | In Progress |
 | Phase 3: Advanced Features | ⏳ Planned | 0/5 (0%) | Future |
 | Phase 4: Optimization | ⏳ Planned | 0/4 (0%) | Future |
@@ -45,13 +45,15 @@
 
 ### In Progress
 
-- **GUI Overlay Assistant** (MVP complete + Tray)
+- **GUI Overlay Assistant** (MVP complete + Tray + Desktop packaging)
   - Window and UI components ✅
   - Global hotkey listener (Alt+Space, X11) ✅
   - Fuzzy search (rapidfuzz fallback) ✅
   - LLM integration via NATS ✅
   - Minimal context awareness (active app) ✅
   - System tray integration ✅
+  - Control flags (`--toggle`, `--show`, `--hide`) ✅
+  - Makefile desktop targets (`make desktop`, `make autostart`) ✅
 
 ### Next Priorities
 
@@ -498,7 +500,7 @@ accomplishments:
   - Beautiful Rich terminal UI
 ```
 
-### Phase 2A: Intelligence (In Progress) 🚧 93.8% Complete
+### Phase 2A: Intelligence (In Progress)
 ```yaml
 status: IN PROGRESS (October 2025)
 completed:
@@ -525,8 +527,8 @@ deliverables:
   - ✅ Health monitoring service (production ready)
   - ✅ Enhanced CLI with health dashboard
   - ✅ GUI overlay (MVP complete)
-  - ⏳ Desktop integration package (tray + .desktop)
-progress: 15/16 tasks (93.8%)
+  - ✅ Desktop integration package (tray + .desktop)
+progress: MVP complete; docs polish and testing pending
 ```
 
 ### Phase 2B: Advanced Intelligence (In Progress)

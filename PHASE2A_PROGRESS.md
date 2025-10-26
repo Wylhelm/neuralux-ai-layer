@@ -1,6 +1,6 @@
 # Phase 2A: Intelligence Layer - Progress Report
 
-**Status**: 🚧 In Progress (90% Complete - 15/16 tasks)  
+**Status**: 🚧 In Progress (Updated with desktop packaging and Wayland activation)  
 **Last Updated**: October 25, 2025
 
 ---
@@ -234,7 +234,7 @@ Results: 3 relevant documents (16%, 15%, 14% match scores)
 
 ### GUI Overlay Assistant
 
-**Status**: ✅ **MVP COMPLETE + Tray**
+**Status**: ✅ **MVP COMPLETE + Tray + Desktop Packaging**
 
 GTK4-based overlay assistant with Alt+Space activation (X11), fuzzy search, LLM integration, and minimal context.
 
@@ -301,6 +301,8 @@ GTK4-based overlay assistant with Alt+Space activation (X11), fuzzy search, LLM 
   - Async NATS calls to LLM, filesystem, health
   - `--tray` option with in-process tray + external helper fallback
   - Customizable tray app name and icon
+  - New control flags: `--toggle`, `--show`, `--hide` (Wayland-friendly)
+  - NATS subjects for control: `ui.overlay.toggle`, `ui.overlay.show`, `ui.overlay.hide`
 
 #### UI Components
 
@@ -325,8 +327,9 @@ GTK4-based overlay assistant with Alt+Space activation (X11), fuzzy search, LLM 
 
 #### Remaining Work
 
-- Wayland-friendly hotkey integration (documented shortcut for now)
+- Wayland-friendly activation (DE shortcut + `aish overlay --toggle`) ✅
 - System tray integration for quick toggle ✅
+- Desktop packaging (launcher + autostart Makefile targets) ✅
 - Documentation polish and user testing
 
 ---
@@ -353,7 +356,7 @@ GTK4-based overlay assistant with Alt+Space activation (X11), fuzzy search, LLM 
 | Tray integration | ✅ | tray.py + CLI | packages/overlay/, packages/cli/aish/ |
 | Context awareness | ✅ | overlay_window.py | packages/overlay/ |
 
-**Progress**: 15/16 tasks complete (90%)
+**Progress**: Overlay features complete for MVP + desktop packaging; final docs polish and testing pending
 
 ---
 
@@ -519,14 +522,15 @@ GTK4-based overlay assistant with Alt+Space activation (X11), fuzzy search, LLM 
 
 ### Updated
 
-- ✅ README.md - Added health monitoring, updated status
+- ✅ README.md - Added health monitoring, overlay control flags, desktop targets
+- ✅ QUICKSTART.md - Overlay control flags, Wayland guidance, desktop targets
+- ✅ QUICK_REFERENCE.md - Overlay control flags and Makefile targets
+- ✅ ARCHITECTURE.md - Progress and subjects updated
 - ✅ PHASE2A_PROGRESS.md - This document
 - ✅ Git commit messages - Detailed and structured
 
 ### Needs Update
 
-- ⏳ ARCHITECTURE.md - Add health service architecture
-- ⏳ QUICKSTART.md - Add health monitoring quick start
 - ⏳ API.md - Document health API endpoints
 - ⏳ OVERLAY.md - Create overlay user guide
 
@@ -544,8 +548,8 @@ GTK4-based overlay assistant with Alt+Space activation (X11), fuzzy search, LLM 
 
 ### Full Release (Target)
 
-- [ ] System tray integration and desktop packaging
-- [ ] Wayland-friendly activation (documented shortcuts or portal)
+- [x] System tray integration and desktop packaging
+- [x] Wayland-friendly activation (documented shortcuts or portal)
 - [ ] Documentation polish and user testing
 - [ ] Comprehensive documentation
 - [ ] User testing on multiple DEs

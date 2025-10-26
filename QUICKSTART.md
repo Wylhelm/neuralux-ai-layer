@@ -107,13 +107,17 @@ aish> /explain ps aux | grep python
 
 ```bash
 aish overlay
-# X11 hotkey (Ctrl+Space by default):
+# X11 hotkey (Alt+Space or Ctrl+Space based on config):
 aish overlay --hotkey
 # System tray icon (optional):
 aish overlay --tray
+# Control an existing instance (Wayland-friendly bindings):
+aish overlay --toggle   # Toggle
+aish overlay --show     # Show/focus
+aish overlay --hide     # Hide
 ```
 
-On Wayland, create a desktop shortcut that runs `aish overlay`. Tray works if AppIndicator is available.
+On Wayland, create a desktop shortcut that runs `aish overlay --toggle` and/or use the Makefile targets below. Tray works if AppIndicator is available.
 Press Esc to hide the overlay.
 
 ## Verification

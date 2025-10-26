@@ -137,6 +137,9 @@ Implemented:
 - `ai.llm.embed` - Embedding generation
 - `system.health.summary` - Current health snapshot and alerts
 - `system.file.search` - Semantic search requests
+- `ui.overlay.toggle` - Toggle overlay visibility
+- `ui.overlay.show` - Show/focus overlay
+- `ui.overlay.hide` - Hide overlay
 
 Planned (from plan.md):
 - `ai.llm.stream` - Streaming completions
@@ -213,7 +216,7 @@ NeuroTuxLayer/
 ## Next Steps (From Plan)
 
 ### Phase 2A (Remaining)
-- [ ] System tray integration and desktop packaging
+- [x] System tray integration and desktop packaging
 - [ ] Documentation polish and user testing
 
 ### Phase 2B (Intelligence)

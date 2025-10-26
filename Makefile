@@ -18,9 +18,19 @@ help:
 	@echo "  make test           Run tests"
 	@echo "  make lint           Run linters"
 	@echo "  make clean          Clean generated files"
+	@echo "  make start-all      Start infra and all Python services (bg)"
+	@echo "  make stop-all       Stop all Python services and infra"
+	@echo "  make overlay        Start GUI overlay in background"
+	@echo "  make overlay-stop   Stop GUI overlay"
+	@echo "  make overlay-logs   Tail overlay logs"
 	@echo ""
 	@echo "Models:"
 	@echo "  make download-model Download default model"
+	@echo ""
+	@echo "Desktop Integration:"
+	@echo "  make desktop         Install .desktop launcher for overlay"
+	@echo "  make autostart       Enable overlay autostart on login"
+	@echo "  make desktop-clean   Remove launcher and autostart entries"
 
 install:
 	@echo "Installing Neuralux packages..."
@@ -61,6 +71,25 @@ status:
 logs:
 	docker compose logs -f
 
+start-all:
+	@bash scripts/start-all.sh
+
+stop-all:
+	@bash scripts/stop-all.sh
+
+overlay:
+	@echo "Starting overlay (background)..."
+	@mkdir -p data/logs data/run
+	@/bin/sh -c 'nohup aish overlay --tray > data/logs/overlay.log 2>&1 & echo $$! > data/run/overlay.pid'
+	@echo "✓ Overlay started → logs: data/logs/overlay.log"
+
+overlay-stop:
+	@echo "Stopping overlay..."
+	@/bin/sh -c 'if [ -f data/run/overlay.pid ]; then PID=$$(cat data/run/overlay.pid); if kill -0 $$PID 2>/dev/null; then kill $$PID 2>/dev/null || true; sleep 1; kill -9 $$PID 2>/dev/null || true; fi; rm -f data/run/overlay.pid; echo "✓ Overlay stopped"; else echo "Overlay not running"; fi'
+
+overlay-logs:
+	@tail -f data/logs/overlay.log
+
 start-llm:
 	@echo "Starting LLM service..."
 	cd services/llm && python service.py
@@ -96,4 +125,22 @@ download-model:
 	@echo ""
 	@echo "After downloading, the model will be available at:"
 	@echo "  ./models/Llama-3.2-3B-Instruct-Q4_K_M.gguf"
+
+desktop:
+	@echo "Installing desktop launcher..."
+	@mkdir -p ~/.local/share/applications
+	@printf "[Desktop Entry]\nName=Neuralux Overlay\nComment=Open the Neuralux assistant overlay\nExec=aish overlay\nTerminal=false\nType=Application\nIcon=utilities-terminal\nCategories=Utility;\nStartupNotify=false\n" > ~/.local/share/applications/neuralux-overlay.desktop
+	@echo "✓ Launcher installed at ~/.local/share/applications/neuralux-overlay.desktop"
+
+autostart: desktop
+	@echo "Enabling autostart..."
+	@mkdir -p ~/.config/autostart
+	@cp ~/.local/share/applications/neuralux-overlay.desktop ~/.config/autostart/
+	@echo "✓ Autostart enabled"
+
+desktop-clean:
+	@echo "Removing desktop entries..."
+	@rm -f ~/.local/share/applications/neuralux-overlay.desktop
+	@rm -f ~/.config/autostart/neuralux-overlay.desktop
+	@echo "✓ Desktop entries removed"
 

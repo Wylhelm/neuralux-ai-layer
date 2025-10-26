@@ -77,16 +77,16 @@ pip install -e packages/cli/
 
 ## Running Neuralux
 
-### Option A: Using Make (Easiest)
+### Option A: One command (infra + services)
 
 ```bash
-# Start infrastructure
-make start
+# Start infra and all Python services in background
+make start-all
 
-# In a new terminal, start LLM service
-make start-llm
+# Optional: start the GUI overlay in background (with tray)
+make overlay
 
-# In another terminal, use the AI shell
+# Use the AI shell
 aish
 ```
 
@@ -111,40 +111,28 @@ Install GTK bindings (Ubuntu/Debian):
 sudo apt install -y python3-gi gir1.2-gtk-4.0 libgtk-4-1 libgtk-4-bin
 ```
 
-Launch the overlay:
+Launch/control the overlay:
 ```bash
-aish overlay
-# X11 hotkey (Alt+Space by default):
-aish overlay --hotkey
+aish overlay                 # Launch overlay (GTK4)
+aish overlay --hotkey        # X11 hotkey (Alt+Space or Ctrl+Space)
+aish overlay --tray          # System tray icon
+# Control an existing instance (Wayland-friendly bindings):
+aish overlay --toggle        # Toggle
+aish overlay --show          # Show/focus
+aish overlay --hide          # Hide
 ```
 
-On Wayland, create a desktop shortcut that runs `aish overlay`.
+On Wayland, bind a desktop shortcut to run `aish overlay --toggle`.
 
 Install AppIndicator support for tray/desktop (Ubuntu/Debian):
 ```bash
 sudo apt install -y gir1.2-ayatanaappindicator3-0.1 libayatana-appindicator3-1
 ```
 
-Create a launcher entry:
+Create a launcher via Makefile and enable autostart (optional):
 ```bash
-mkdir -p ~/.local/share/applications
-cat > ~/.local/share/applications/neuralux-overlay.desktop << 'EOF'
-[Desktop Entry]
-Name=Neuralux Overlay
-Comment=Open the Neuralux assistant overlay
-Exec=aish overlay
-Terminal=false
-Type=Application
-Icon=utilities-terminal
-Categories=Utility;
-StartupNotify=false
-EOF
-```
-
-Autostart on login (optional):
-```bash
-mkdir -p ~/.config/autostart
-cp ~/.local/share/applications/neuralux-overlay.desktop ~/.config/autostart/
+make desktop      # Install launcher
+make autostart    # Autostart on login
 ```
 
 ## Your First Commands

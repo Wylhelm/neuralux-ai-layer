@@ -4,8 +4,7 @@
 
 ### Start Everything
 ```bash
-make start              # Start infrastructure
-cd services/llm && python service.py &  # Start LLM (with model)
+make start-all          # Start infra + all Python services (background)
 aish                    # Use AI shell
 ```
 
@@ -18,8 +17,7 @@ docker compose ps      # Docker services
 
 ### Stop Everything
 ```bash
-make stop              # Stop infrastructure
-./scripts/stop-services.sh  # Stop all including LLM
+make stop-all          # Stop services and infra
 ```
 
 ## 🧪 Testing Commands
@@ -88,6 +86,9 @@ aish status                              # Check services
 aish overlay                 # Launch GUI overlay (GTK4)
 aish overlay --hotkey        # Enable Alt+Space (default) on X11; Esc hides
 aish overlay --tray          # Show system tray icon (Ayatana/AppIndicator)
+aish overlay --toggle        # Toggle an existing overlay instance (bind this on Wayland)
+aish overlay --show          # Show/focus existing overlay instance
+aish overlay --hide          # Hide overlay instance
 ```
 
 #### Tray and desktop integration (optional)
@@ -95,23 +96,11 @@ aish overlay --tray          # Show system tray icon (Ayatana/AppIndicator)
 # Install AppIndicator support (Ubuntu/Debian)
 sudo apt install -y gir1.2-ayatanaappindicator3-0.1 libayatana-appindicator3-1
 
-# Create launcher
-mkdir -p ~/.local/share/applications
-cat > ~/.local/share/applications/neuralux-overlay.desktop << 'EOF'
-[Desktop Entry]
-Name=Neuralux Overlay
-Comment=Open the Neuralux assistant overlay
-Exec=aish overlay
-Terminal=false
-Type=Application
-Icon=utilities-terminal
-Categories=Utility;
-StartupNotify=false
-EOF
+# Create launcher via Makefile
+make desktop
 
 # Autostart on login (optional)
-mkdir -p ~/.config/autostart
-cp ~/.local/share/applications/neuralux-overlay.desktop ~/.config/autostart/
+make autostart
 ```
 
 Enable tray by default via env:
@@ -123,6 +112,11 @@ Customize tray name and icon:
 ```bash
 export OVERLAY_APP_NAME="Neuralux"
 export OVERLAY_TRAY_ICON="$PWD/packages/overlay/assets/neuralux-tray.svg"
+```
+
+Wayland tip: bind a desktop shortcut to run:
+```bash
+aish overlay --toggle
 ```
 
 ## 📁 Important Files
@@ -137,8 +131,8 @@ export OVERLAY_TRAY_ICON="$PWD/packages/overlay/assets/neuralux-tray.svg"
 - `services/llm/config.py` - LLM configuration
 
 ### Scripts
-- `scripts/start-services.sh` - Start infrastructure
-- `scripts/stop-services.sh` - Stop all services
+- `scripts/start-all.sh` - Start infra + services (bg)
+- `scripts/stop-all.sh` - Stop services + infra
 - `test-neuralux.sh` - Comprehensive tests
 - `demo-without-model.py` - Infrastructure demo
 

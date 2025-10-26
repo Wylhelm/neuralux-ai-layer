@@ -298,6 +298,24 @@ class OverlayWindow(Gtk.ApplicationWindow):
             except Exception:
                 pass
             self.search_entry.grab_focus()
+
+    def show_overlay(self):
+        """Ensure the overlay is visible and focused."""
+        if not self.is_visible():
+            self.toggle_visibility()
+        else:
+            try:
+                self.present()
+                self.set_keep_above(True)
+            except Exception:
+                pass
+
+    def hide_overlay(self):
+        """Hide the overlay window."""
+        try:
+            self.hide()
+        except Exception:
+            pass
     
     def add_result(self, title: str, subtitle: str = ""):
         """Add a result to the list."""
