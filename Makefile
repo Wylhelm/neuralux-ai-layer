@@ -21,8 +21,11 @@ help:
 	@echo "  make start-all      Start infra and all Python services (bg)"
 	@echo "  make stop-all       Stop all Python services and infra"
 	@echo "  make overlay        Start GUI overlay in background"
+	@echo "  make overlay-hotkey Start overlay with hotkey enabled (X11)"
 	@echo "  make overlay-stop   Stop GUI overlay"
 	@echo "  make overlay-logs   Tail overlay logs"
+	@echo "  make smoke          Run overlay smoke test"
+	@echo "  make ci             Run tests and linters"
 	@echo ""
 	@echo "Models:"
 	@echo "  make download-model Download default model"
@@ -78,10 +81,10 @@ stop-all:
 	@bash scripts/stop-all.sh
 
 overlay:
-	@echo "Starting overlay (background)..."
+	@echo "Starting overlay with Ctrl+Space hotkey (background)..."
 	@mkdir -p data/logs data/run
-	@/bin/sh -c 'nohup aish overlay --tray > data/logs/overlay.log 2>&1 & echo $$! > data/run/overlay.pid'
-	@echo "✓ Overlay started → logs: data/logs/overlay.log"
+	@/bin/sh -c 'nohup aish overlay --hotkey --tray > data/logs/overlay.log 2>&1 & echo $$! > data/run/overlay.pid'
+	@echo "✓ Overlay started with Ctrl+Space hotkey and tray → logs: data/logs/overlay.log"
 
 overlay-stop:
 	@echo "Stopping overlay..."
@@ -89,6 +92,9 @@ overlay-stop:
 
 overlay-logs:
 	@tail -f data/logs/overlay.log
+
+smoke:
+	@bash scripts/smoke-overlay.sh
 
 start-llm:
 	@echo "Starting LLM service..."
@@ -100,6 +106,8 @@ test:
 lint:
 	black packages/ services/ --check
 	ruff check packages/ services/
+
+ci: test lint
 
 format:
 	black packages/ services/
@@ -129,7 +137,7 @@ download-model:
 desktop:
 	@echo "Installing desktop launcher..."
 	@mkdir -p ~/.local/share/applications
-	@printf "[Desktop Entry]\nName=Neuralux Overlay\nComment=Open the Neuralux assistant overlay\nExec=aish overlay\nTerminal=false\nType=Application\nIcon=utilities-terminal\nCategories=Utility;\nStartupNotify=false\n" > ~/.local/share/applications/neuralux-overlay.desktop
+	@printf "[Desktop Entry]\nName=Neuralux Overlay\nComment=Open the Neuralux assistant overlay with Ctrl+Space hotkey\nExec=aish overlay --hotkey --tray\nTerminal=false\nType=Application\nIcon=utilities-terminal\nCategories=Utility;\nStartupNotify=false\n" > ~/.local/share/applications/neuralux-overlay.desktop
 	@echo "✓ Launcher installed at ~/.local/share/applications/neuralux-overlay.desktop"
 
 autostart: desktop

@@ -111,18 +111,19 @@ sudo apt install -y python3-gi gir1.2-gtk-4.0 libgtk-4-1 libgtk-4-bin
 
 Launch the overlay:
 ```bash
-aish overlay
-# X11 hotkey (Alt+Space or Ctrl+Space based on config):
-aish overlay --hotkey
-# Tray icon (quick toggle from system tray):
-aish overlay --tray
+aish overlay                    # Start overlay (no hotkey)
+aish overlay --hotkey           # Enable Ctrl+Space hotkey (X11 only)
+aish overlay --hotkey --tray    # Enable both hotkey and tray (recommended)
+
 # Control an existing instance (Wayland-friendly):
-aish overlay --toggle   # Toggle
+aish overlay --toggle   # Toggle visibility
 aish overlay --show     # Show/focus
 aish overlay --hide     # Hide
 ```
 
-On Wayland, bind a desktop shortcut to run `aish overlay`. Tray works if AppIndicator is available.
+**Important:** The `--hotkey` flag is **required** to enable the global Ctrl+Space hotkey on X11. Without it, use the tray icon or control commands.
+
+On Wayland, bind a desktop shortcut to run `aish overlay --toggle`. Tray works if AppIndicator is available.
 Press Esc to hide the overlay.
 
 Troubleshooting (X11): If the overlay appears behind other windows, ensure you're on Xorg and try:
@@ -229,7 +230,7 @@ neuralux-ai-layer/
 - [x] One-command installation script
 - [x] Comprehensive documentation
 
-### Phase 2A - Intelligence 🚧 In Progress (15/16 tasks)
+### Phase 2A - Intelligence 🚧 In Progress (16/16 tasks)
 - [x] System health monitoring (CPU, memory, disk, network)
 - [x] Real-time metrics collection with psutil
 - [x] Time-series storage with DuckDB
@@ -238,7 +239,7 @@ neuralux-ai-layer/
 - [x] Beautiful terminal dashboard (`aish health`)
 - [x] Live monitoring mode (`aish health --watch`)
 - [x] System tray integration
-- [ ] Desktop packaging
+- [x] Desktop packaging
 - [x] GUI overlay (Alt+Space assistant)
 - [x] Command palette with fuzzy search
 - [x] Global hotkey listener (X11)
@@ -246,6 +247,11 @@ neuralux-ai-layer/
 - [x] Screen context awareness (minimal)
 - [ ] Temporal intelligence (system history)
 - [ ] Documentation polish and user testing
+
+### Additional Docs
+
+- See `OVERLAY.md` for overlay usage, Wayland guidance, tray, and troubleshooting
+- See `API.md` for health API endpoints and NATS subjects
 
 ### Phase 2B - Advanced Intelligence (Future)
 - [ ] Vision service (OCR, screen understanding)

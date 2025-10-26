@@ -113,14 +113,16 @@ sudo apt install -y python3-gi gir1.2-gtk-4.0 libgtk-4-1 libgtk-4-bin
 
 Launch/control the overlay:
 ```bash
-aish overlay                 # Launch overlay (GTK4)
-aish overlay --hotkey        # X11 hotkey (Alt+Space or Ctrl+Space)
-aish overlay --tray          # System tray icon
-# Control an existing instance (Wayland-friendly bindings):
-aish overlay --toggle        # Toggle
+aish overlay                 # Launch overlay (GTK4, no hotkey)
+aish overlay --hotkey        # Enable Ctrl+Space hotkey (X11 only)
+aish overlay --hotkey --tray # Enable both hotkey and tray (recommended)
+# Control an existing instance (Wayland-friendly):
+aish overlay --toggle        # Toggle visibility
 aish overlay --show          # Show/focus
 aish overlay --hide          # Hide
 ```
+
+**Important:** The `--hotkey` flag is **required** to enable the global Ctrl+Space hotkey.
 
 On Wayland, bind a desktop shortcut to run `aish overlay --toggle`.
 

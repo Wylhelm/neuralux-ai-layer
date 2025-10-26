@@ -83,13 +83,17 @@ aish status                              # Check services
 
 ### Overlay
 ```bash
-aish overlay                 # Launch GUI overlay (GTK4)
-aish overlay --hotkey        # Enable Alt+Space (default) on X11; Esc hides
-aish overlay --tray          # Show system tray icon (Ayatana/AppIndicator)
-aish overlay --toggle        # Toggle an existing overlay instance (bind this on Wayland)
+aish overlay                 # Launch GUI overlay (GTK4, no hotkey)
+aish overlay --hotkey        # Enable Ctrl+Space hotkey (X11 only) - REQUIRED for hotkey
+aish overlay --hotkey --tray # Enable both hotkey and tray (recommended)
+aish overlay --toggle        # Toggle an existing overlay instance
 aish overlay --show          # Show/focus existing overlay instance
 aish overlay --hide          # Hide overlay instance
 ```
+
+**Note:** You MUST use `--hotkey` to enable the Ctrl+Space hotkey. Press Esc to hide.
+
+See `OVERLAY.md` for Wayland tips, tray setup, and troubleshooting.
 
 #### Tray and desktop integration (optional)
 ```bash

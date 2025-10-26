@@ -330,7 +330,7 @@ GTK4-based overlay assistant with Alt+Space activation (X11), fuzzy search, LLM 
 - Wayland-friendly activation (DE shortcut + `aish overlay --toggle`) ✅
 - System tray integration for quick toggle ✅
 - Desktop packaging (launcher + autostart Makefile targets) ✅
-- Documentation polish and user testing
+- Documentation polish and user testing (OVERLAY.md, API.md)
 
 ---
 

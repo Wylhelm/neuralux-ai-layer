@@ -57,10 +57,9 @@
 
 ### Next Priorities
 
-1. Desktop packaging
-2. Voice interface (STT/TTS)
-3. Vision service (OCR, screen understanding)
-4. Temporal intelligence (system history)
+1. Voice interface (STT/TTS)
+2. Vision service (OCR, screen understanding)
+3. Temporal intelligence (system history)
 
 For detailed progress, see: [PHASE2A_PROGRESS.md](PHASE2A_PROGRESS.md)
 
@@ -521,13 +520,15 @@ completed:
     - ✅ LLM integration
     - ✅ Minimal context awareness
 pending:
-  - ⏳ Desktop packaging
   - ⏳ Temporal intelligence system
 deliverables:
   - ✅ Health monitoring service (production ready)
   - ✅ Enhanced CLI with health dashboard
   - ✅ GUI overlay (MVP complete)
   - ✅ Desktop integration package (tray + .desktop)
+docs:
+  - OVERLAY.md (usage, Wayland guidance, tray, troubleshooting)
+  - API.md (health REST endpoints and NATS subjects)
 progress: MVP complete; docs polish and testing pending
 ```
 

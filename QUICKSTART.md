@@ -106,19 +106,41 @@ aish> /explain ps aux | grep python
 ### Overlay Assistant
 
 ```bash
-aish overlay
-# X11 hotkey (Alt+Space or Ctrl+Space based on config):
-aish overlay --hotkey
-# System tray icon (optional):
-aish overlay --tray
-# Control an existing instance (Wayland-friendly bindings):
-aish overlay --toggle   # Toggle
+aish overlay                    # Start overlay (no hotkey)
+aish overlay --hotkey           # Enable Ctrl+Space hotkey (X11 only)
+aish overlay --hotkey --tray    # Enable both hotkey and tray (recommended)
+
+# Control an existing instance (Wayland-friendly):
+aish overlay --toggle   # Toggle visibility
 aish overlay --show     # Show/focus
 aish overlay --hide     # Hide
 ```
 
+**Important:** The `--hotkey` flag is **required** to enable the global Ctrl+Space hotkey on X11. Without it, use the tray icon or `aish overlay --toggle` to control the overlay.
+
 On Wayland, create a desktop shortcut that runs `aish overlay --toggle` and/or use the Makefile targets below. Tray works if AppIndicator is available.
 Press Esc to hide the overlay.
+
+### Desktop Integration Verification
+
+```bash
+# Create launcher and autostart entries
+make desktop
+make autostart  # optional
+
+# Launch overlay from app menu: "Neuralux Overlay"
+# Toggle via system tray (if enabled)
+
+# Control an existing instance via CLI
+aish overlay --toggle
+aish overlay --show
+aish overlay --hide
+```
+
+Expected:
+- App launcher appears and starts overlay
+- Toggle/show/hide signals affect the same instance
+- Tray icon toggles overlay if AppIndicator is available
 
 ## Verification
 
