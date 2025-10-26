@@ -95,6 +95,27 @@ aish overlay --hide          # Hide overlay instance
 
 See `OVERLAY.md` for Wayland tips, tray setup, and troubleshooting.
 
+### Voice Commands
+```bash
+# Voice Assistant (Interactive conversation)
+aish assistant                       # Single turn conversation
+aish assistant -c                    # Continuous conversation mode
+aish assistant -d 10                 # 10 second recording per turn
+
+# Speech-to-text
+aish listen                          # Record 5 seconds and transcribe
+aish listen --duration 10            # Record 10 seconds
+aish listen --file audio.wav         # Transcribe file
+aish listen --language fr            # Specify language
+
+# Text-to-speech
+aish speak "Hello, world!"
+aish speak "Faster" --speed 1.5
+aish speak "Save" --output audio.wav
+```
+
+See `AUDIO.md` for complete voice interface documentation.
+
 #### Tray and desktop integration (optional)
 ```bash
 # Install AppIndicator support (Ubuntu/Debian)
@@ -145,6 +166,9 @@ aish overlay --toggle
 - `GETTING_STARTED.md` - Full setup guide
 - `QUICKSTART.md` - 5-minute start
 - `ARCHITECTURE.md` - Technical details
+- `AUDIO.md` - Voice interface guide
+- `OVERLAY.md` - GUI overlay guide
+- `API.md` - API reference
 - `TEST_RESULTS.md` - Test report
 - `plan.md` - Original project plan
 

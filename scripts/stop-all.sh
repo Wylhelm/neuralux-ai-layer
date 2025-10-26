@@ -27,7 +27,7 @@ stop_service() {
   fi
 }
 
-for svc in llm filesystem health vision; do
+for svc in llm filesystem health vision audio; do
   stop_service "$svc"
 done
 

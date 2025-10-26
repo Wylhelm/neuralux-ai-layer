@@ -1,4 +1,4 @@
-# Neuralux API Reference (Phase 2A)
+# Neuralux API Reference (Phase 2A/2B)
 
 ## Health Service
 
@@ -34,6 +34,70 @@ Example (Python):
 
 ```python
 response = await message_bus.request("system.health.summary", {}, timeout=5.0)
+```
+
+## Audio Service
+
+### REST
+
+- GET `/` → Service info
+- GET `/info` → Detailed service information and models
+- POST `/stt` → Speech-to-text transcription
+- POST `/stt/file` → Upload audio file for transcription
+- POST `/tts` → Text-to-speech synthesis (returns JSON with base64 audio)
+- POST `/tts/audio` → Text-to-speech synthesis (returns audio file)
+- POST `/vad` → Voice activity detection
+
+**STT Request:**
+```json
+{
+  "audio_path": "/path/to/audio.wav",  // OR audio_data (base64)
+  "language": "en",                     // or "auto"
+  "task": "transcribe",                 // or "translate"
+  "vad_filter": true,
+  "word_timestamps": false
+}
+```
+
+**TTS Request:**
+```json
+{
+  "text": "Hello, world!",
+  "voice": "en_US-lessac-medium",       // optional
+  "speed": 1.0,                         // 0.5-2.0
+  "output_format": "wav"
+}
+```
+
+**VAD Request:**
+```json
+{
+  "audio_path": "/path/to/audio.wav",  // OR audio_data (base64)
+  "threshold": 0.5                      // 0.0-1.0
+}
+```
+
+### NATS Subjects
+
+- `ai.audio.stt` → Speech-to-text
+- `ai.audio.tts` → Text-to-speech
+- `ai.audio.vad` → Voice activity detection
+- `ai.audio.info` → Service information
+
+Example (Python):
+
+```python
+# Speech-to-text
+response = await message_bus.request("ai.audio.stt", {
+    "audio_path": "/path/to/recording.wav",
+    "language": "en"
+}, timeout=60.0)
+
+# Text-to-speech
+response = await message_bus.request("ai.audio.tts", {
+    "text": "Hello from Neuralux!",
+    "speed": 1.2
+}, timeout=30.0)
 ```
 
 ## Overlay Control (NATS)

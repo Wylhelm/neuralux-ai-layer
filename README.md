@@ -9,7 +9,8 @@ Neuralux AI Layer integrates advanced AI capabilities directly into your Linux s
 - ✅ **Semantic file search** - Find files by content, not just names
 - ✅ **Intelligent command generation** - AI suggests safe, correct commands
 - ✅ **System health monitoring** - Real-time metrics with anomaly detection
-- 🚧 Voice, gesture, and GUI interactions (Phase 2)
+- ✅ **Voice interface** - Speech-to-text and text-to-speech (Phase 2B)
+- 🚧 Gesture and advanced GUI interactions (Phase 2/3)
 - ✅ **Privacy-first, local-first processing** - Your data stays on your machine
 
 ## Requirements
@@ -180,6 +181,35 @@ aish health --watch
 aish status
 ```
 
+### Voice Interface
+
+```bash
+# Voice Assistant: Interactive conversation with voice I/O
+aish assistant                       # Single turn conversation
+aish assistant -c                    # Continuous conversation mode
+aish assistant -d 10                 # 10 second recording per turn
+
+# Speech-to-text: Record and transcribe
+aish listen                          # Record 5 seconds
+aish listen --duration 10            # Record 10 seconds
+aish listen --file audio.wav         # Transcribe file
+aish listen --language fr            # French transcription
+
+# Text-to-speech: Convert text to audio
+aish speak "Hello, world!"
+aish speak "Faster speech" --speed 1.5
+aish speak "Save audio" --output speech.wav
+```
+
+**Features:**
+- **STT**: Powered by faster-whisper (Whisper optimized)
+- **TTS**: Powered by Piper (fast neural TTS)
+- **VAD**: Voice activity detection with Silero
+- **Multi-language**: Auto-detect or specify language
+- **Offline**: All processing happens locally
+
+See `AUDIO.md` for complete voice interface documentation.
+
 **Health Metrics:**
 - **CPU**: Usage %, per-core stats, load averages
 - **Memory**: RAM and swap usage with GB breakdown
@@ -201,8 +231,8 @@ neuralux-ai-layer/
 │   ├── llm/           # Language model service
 │   ├── filesystem/    # Semantic file search
 │   ├── health/        # System health monitoring
+│   ├── audio/         # Audio processing (STT/TTS) ✅
 │   ├── vision/        # Computer vision (Phase 2)
-│   ├── audio/         # Audio processing (Phase 2)
 │   └── system/        # System intelligence (Phase 2)
 ├── packages/          # Installable packages
 │   ├── cli/          # Command line interface (aish)
@@ -230,7 +260,7 @@ neuralux-ai-layer/
 - [x] One-command installation script
 - [x] Comprehensive documentation
 
-### Phase 2A - Intelligence 🚧 In Progress (16/16 tasks)
+### Phase 2A - Intelligence ✅ Complete (16/16 tasks)
 - [x] System health monitoring (CPU, memory, disk, network)
 - [x] Real-time metrics collection with psutil
 - [x] Time-series storage with DuckDB
@@ -245,18 +275,22 @@ neuralux-ai-layer/
 - [x] Global hotkey listener (X11)
 - [x] LLM integration in GUI
 - [x] Screen context awareness (minimal)
+
+### Phase 2B - Advanced Intelligence 🚧 In Progress (2/4 tasks)
+- [x] Voice interface (STT/TTS) ✅ **NEW!**
+  - Speech-to-text with faster-whisper
+  - Text-to-speech with Piper
+  - Voice activity detection with Silero
+  - CLI commands: `aish listen`, `aish speak`
+- [ ] Vision service (OCR, screen understanding)
 - [ ] Temporal intelligence (system history)
-- [ ] Documentation polish and user testing
+- [ ] Enhanced automation
 
 ### Additional Docs
 
+- See `AUDIO.md` for voice interface guide and API documentation
 - See `OVERLAY.md` for overlay usage, Wayland guidance, tray, and troubleshooting
-- See `API.md` for health API endpoints and NATS subjects
-
-### Phase 2B - Advanced Intelligence (Future)
-- [ ] Vision service (OCR, screen understanding)
-- [ ] Voice interface (STT/TTS)
-- [ ] Enhanced automation
+- See `API.md` for API endpoints and NATS subjects
 
 ## License
 

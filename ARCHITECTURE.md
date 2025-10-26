@@ -135,6 +135,10 @@ This document describes the current state of the Neuralux AI Layer implementatio
 Implemented:
 - `ai.llm.request` - LLM completion requests
 - `ai.llm.embed` - Embedding generation
+- `ai.audio.stt` - Speech-to-text transcription
+- `ai.audio.tts` - Text-to-speech synthesis
+- `ai.audio.vad` - Voice activity detection
+- `ai.audio.info` - Audio service information
 - `system.health.summary` - Current health snapshot and alerts
 - `system.file.search` - Semantic search requests
 - `ui.overlay.toggle` - Toggle overlay visibility
@@ -144,7 +148,6 @@ Implemented:
 Planned (from plan.md):
 - `ai.llm.stream` - Streaming completions
 - `ai.vision.*` - Vision service operations
-- `ai.audio.*` - Audio service operations
 - `system.file.*` - File system operations
 - `system.process.*` - Process management
 - `user.interaction.*` - User events
@@ -198,11 +201,19 @@ NeuroTuxLayer/
 │           └── main.py        # CLI implementation
 │
 ├── services/
-│   └── llm/                   # Language model service
-│       ├── config.py          # Service config
-│       ├── models.py          # Data models
-│       ├── llm_backend.py     # llama.cpp backend
-│       └── service.py         # FastAPI service
+│   ├── llm/                   # Language model service
+│   │   ├── config.py          # Service config
+│   │   ├── models.py          # Data models
+│   │   ├── llm_backend.py     # llama.cpp backend
+│   │   └── service.py         # FastAPI service
+│   │
+│   ├── audio/                 # Audio service (Phase 2B)
+│   │   ├── config.py          # Service config
+│   │   ├── models.py          # Data models
+│   │   ├── stt_backend.py     # faster-whisper STT
+│   │   ├── tts_backend.py     # Piper TTS
+│   │   ├── vad_backend.py     # Silero VAD
+│   │   └── service.py         # FastAPI service
 │
 ├── scripts/
 │   ├── start-services.sh      # Start all services
@@ -215,14 +226,19 @@ NeuroTuxLayer/
 
 ## Next Steps (From Plan)
 
-### Phase 2A (Remaining)
+### Phase 2A ✅ COMPLETE
+- [x] System health monitoring
+- [x] GUI overlay assistant
 - [x] System tray integration and desktop packaging
-- [ ] Documentation polish and user testing
 
-### Phase 2B (Intelligence)
+### Phase 2B (Intelligence) 🚧 In Progress
+- [x] Voice interface (STT/TTS) ✅ **IMPLEMENTED**
+  - Speech-to-text with faster-whisper
+  - Text-to-speech with Piper
+  - Voice activity detection with Silero VAD
+  - CLI commands: `aish listen`, `aish speak`
 - [ ] Vision service (OCR, screen understanding)
 - [ ] Temporal intelligence system
-- [ ] Voice interface (STT/TTS)
 
 ### Phase 3 (Advanced Features)
 - [ ] Gesture recognition

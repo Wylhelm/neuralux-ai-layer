@@ -51,6 +51,10 @@ start_service() {
   echo "▶ Starting $name service..."
   (
     cd "$dir"
+    # Set cuDNN library path for audio service (CUDA support)
+    if [ "$name" = "audio" ]; then
+      export LD_LIBRARY_PATH="$PROJECT_ROOT/myenv/lib/python3.12/site-packages/nvidia/cudnn/lib:$LD_LIBRARY_PATH"
+    fi
     nohup "$PY" service.py > "$logfile" 2>&1 &
     echo $! > "$pidfile"
   )
@@ -58,7 +62,7 @@ start_service() {
 }
 
 # Core services
-for svc in llm filesystem health vision; do
+for svc in llm filesystem health vision audio; do
   start_service "$svc"
 done
 

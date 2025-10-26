@@ -53,6 +53,44 @@ class AIShell:
         if self.message_bus:
             await self.message_bus.disconnect()
     
+    async def speak(self, text: str, wait: bool = True):
+        """Speak text using TTS."""
+        if not self.message_bus:
+            return
+        
+        try:
+            import subprocess
+            import base64
+            import tempfile
+            
+            response = await self.message_bus.request(
+                "ai.audio.tts",
+                {"text": text, "output_format": "wav"},
+                timeout=30.0
+            )
+            
+            if "error" not in response:
+                audio_data = base64.b64decode(response["audio_data"])
+                
+                # Save and play
+                with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
+                    f.write(audio_data)
+                    temp_path = f.name
+                
+                try:
+                    # Try paplay first (PulseAudio)
+                    subprocess.run(["paplay", temp_path], check=True, capture_output=True)
+                except:
+                    try:
+                        # Fallback to aplay
+                        subprocess.run(["aplay", temp_path], check=True, capture_output=True)
+                    except:
+                        pass
+                finally:
+                    os.unlink(temp_path)
+        except Exception:
+            pass
+    
     def _get_context_info(self) -> str:
         """Get context information for the LLM."""
         context_parts = [
@@ -537,6 +575,18 @@ def status():
                     console.print("[yellow]⚠[/yellow] Health service: Unexpected status")
         except:
             console.print("[red]✗[/red] Health service: Not running")
+        
+        # Check audio service
+        try:
+            import httpx
+            async with httpx.AsyncClient() as client:
+                response = await client.get("http://localhost:8006/", timeout=5.0)
+                if response.status_code == 200:
+                    console.print("[green]✓[/green] Audio service: Running")
+                else:
+                    console.print("[yellow]⚠[/yellow] Audio service: Unexpected status")
+        except:
+            console.print("[red]✗[/red] Audio service: Not running")
     
     asyncio.run(run())
 
@@ -721,6 +771,229 @@ def health(watch: bool, interval: int):
         
         finally:
             await shell.disconnect()
+    
+    asyncio.run(run())
+
+
+@cli.command()
+@click.argument("text", nargs=-1, required=False)
+@click.option("--voice", "-v", default=None, help="Voice model to use")
+@click.option("--speed", "-s", type=float, default=None, help="Speech speed (0.5-2.0)")
+@click.option("--output", "-o", type=click.Path(), default=None, help="Save audio to file")
+@click.option("--play", "-p", is_flag=True, help="Play audio immediately")
+def speak(text, voice, speed, output, play):
+    """Convert text to speech.
+    
+    Examples:
+      aish speak "Hello, world!"
+      aish speak "This is faster" --speed 1.5
+      aish speak "Save to file" --output speech.wav
+    """
+    if not text:
+        console.print("[red]Error: No text provided[/red]")
+        console.print("Usage: aish speak <text>")
+        return
+    
+    text_to_speak = " ".join(text)
+    shell = AIShell()
+    
+    async def run():
+        if await shell.connect():
+            try:
+                console.print("[bold]Synthesizing speech...[/bold]")
+                
+                # Request TTS from audio service
+                request_data = {
+                    "text": text_to_speak,
+                    "output_format": "wav"
+                }
+                if voice:
+                    request_data["voice"] = voice
+                if speed:
+                    request_data["speed"] = speed
+                
+                response = await shell.message_bus.request(
+                    "ai.audio.tts",
+                    request_data,
+                    timeout=30.0
+                )
+                
+                if "error" in response:
+                    console.print(f"[red]Error: {response['error']}[/red]")
+                    console.print("\n[yellow]Make sure the audio service is running:[/yellow]")
+                    console.print("  cd services/audio && python service.py &")
+                    return
+                
+                # Decode audio data
+                import base64
+                audio_data = base64.b64decode(response["audio_data"])
+                
+                # Save to file if requested
+                if output:
+                    with open(output, "wb") as f:
+                        f.write(audio_data)
+                    console.print(f"[green]✓ Audio saved to {output}[/green]")
+                
+                # Play if requested
+                if play or not output:
+                    import tempfile
+                    with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
+                        f.write(audio_data)
+                        temp_path = f.name
+                    
+                    try:
+                        # Try to play with different audio players (paplay first for PulseAudio/PipeWire)
+                        players = ["paplay", "aplay", "ffplay", "play"]
+                        for player in players:
+                            try:
+                                import subprocess
+                                subprocess.run([player, temp_path], check=True, capture_output=True)
+                                console.print(f"[green]✓ Played audio ({response['duration']:.1f}s)[/green]")
+                                break
+                            except (FileNotFoundError, subprocess.CalledProcessError):
+                                continue
+                        else:
+                            console.print("[yellow]No audio player found. Install aplay, paplay, or ffplay.[/yellow]")
+                    finally:
+                        Path(temp_path).unlink()
+                
+                console.print(f"[dim]Processing time: {response.get('processing_time', 0):.2f}s[/dim]")
+                
+            finally:
+                await shell.disconnect()
+    
+    asyncio.run(run())
+
+
+@cli.command()
+@click.option("--language", "-l", default=None, help="Language code (e.g., 'en', 'fr') or 'auto'")
+@click.option("--output", "-o", type=click.Path(), default=None, help="Save transcription to file")
+@click.option("--file", "-f", type=click.Path(exists=True), help="Transcribe from audio file")
+@click.option("--duration", "-d", type=int, default=5, help="Recording duration in seconds (if not using --file)")
+def listen(language, output, file, duration):
+    """Convert speech to text.
+    
+    Examples:
+      aish listen                           # Record 5 seconds and transcribe
+      aish listen --duration 10             # Record 10 seconds
+      aish listen --file recording.wav      # Transcribe existing file
+      aish listen --language fr             # Transcribe in French
+    """
+    shell = AIShell()
+    
+    async def run():
+        if await shell.connect():
+            try:
+                audio_path = file
+                
+                # If no file provided, record from microphone
+                if not audio_path:
+                    console.print(f"[bold]Recording for {duration} seconds...[/bold]")
+                    console.print("[dim]Speak now...[/dim]")
+                    
+                    try:
+                        import pyaudio
+                        import wave
+                        import tempfile
+                        
+                        # Recording parameters
+                        CHUNK = 1024
+                        FORMAT = pyaudio.paInt16
+                        CHANNELS = 1
+                        RATE = 16000
+                        
+                        p = pyaudio.PyAudio()
+                        stream = p.open(
+                            format=FORMAT,
+                            channels=CHANNELS,
+                            rate=RATE,
+                            input=True,
+                            frames_per_buffer=CHUNK
+                        )
+                        
+                        frames = []
+                        
+                        for i in range(0, int(RATE / CHUNK * duration)):
+                            data = stream.read(CHUNK)
+                            frames.append(data)
+                        
+                        stream.stop_stream()
+                        stream.close()
+                        p.terminate()
+                        
+                        # Save to temporary file
+                        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
+                            temp_path = f.name
+                        
+                        wf = wave.open(temp_path, 'wb')
+                        wf.setnchannels(CHANNELS)
+                        wf.setsampwidth(p.get_sample_size(FORMAT))
+                        wf.setframerate(RATE)
+                        wf.writeframes(b''.join(frames))
+                        wf.close()
+                        
+                        audio_path = temp_path
+                        
+                    except ImportError:
+                        console.print("[red]Error: PyAudio not installed[/red]")
+                        console.print("Install with: pip install pyaudio")
+                        return
+                    except Exception as e:
+                        console.print(f"[red]Recording failed: {e}[/red]")
+                        return
+                
+                console.print("[bold]Transcribing...[/bold]")
+                
+                # Request STT from audio service
+                request_data = {
+                    "audio_path": audio_path,
+                    "vad_filter": True
+                }
+                if language:
+                    request_data["language"] = language
+                
+                response = await shell.message_bus.request(
+                    "ai.audio.stt",
+                    request_data,
+                    timeout=60.0
+                )
+                
+                if "error" in response:
+                    console.print(f"[red]Error: {response['error']}[/red]")
+                    console.print("\n[yellow]Make sure the audio service is running:[/yellow]")
+                    console.print("  cd services/audio && python service.py &")
+                    return
+                
+                # Display results
+                text = response["text"]
+                if not text:
+                    console.print("[yellow]No speech detected in audio[/yellow]")
+                else:
+                    console.print("\n[bold green]Transcription:[/bold green]")
+                    console.print(Panel(text, border_style="green"))
+                    
+                    if response.get("language"):
+                        console.print(f"[dim]Language: {response['language']}[/dim]")
+                    if response.get("duration"):
+                        console.print(f"[dim]Audio duration: {response['duration']:.1f}s[/dim]")
+                    if response.get("processing_time"):
+                        console.print(f"[dim]Processing time: {response['processing_time']:.2f}s[/dim]")
+                    
+                    # Save to file if requested
+                    if output:
+                        with open(output, "w") as f:
+                            f.write(text)
+                        console.print(f"\n[green]✓ Transcription saved to {output}[/green]")
+                
+                # Cleanup temporary file if we created one
+                if not file and audio_path:
+                    try:
+                        Path(audio_path).unlink()
+                    except:
+                        pass
+                
+            finally:
+                await shell.disconnect()
     
     asyncio.run(run())
 
@@ -969,6 +1242,342 @@ def overlay(hotkey: bool, tray: bool, toggle: bool, show: bool, hide: bool):
         app.run(None)
     except Exception as e:
         console.print(f"[red]Overlay terminated with error:[/red] {e}")
+
+@cli.command()
+@click.option("--continuous", "-c", is_flag=True, help="Continuous conversation mode (Ctrl+C to exit)")
+@click.option("--duration", "-d", type=int, default=5, help="Recording duration per turn (seconds)")
+@click.option("--language", "-l", default=None, help="Force specific language (e.g., 'en', 'fr')")
+@click.option("--wake-word", "-w", is_flag=True, help="Require 'neuralux' wake word to activate")
+def assistant(continuous, duration, language, wake_word):
+    """Voice-activated AI assistant.
+    
+    Interactive conversation with voice input and output.
+    
+    Examples:
+      aish assistant                  # Single turn conversation
+      aish assistant -c               # Continuous conversation
+      aish assistant -d 10            # 10 second recording per turn
+      aish assistant -w               # Require wake word
+    """
+    shell = AIShell()
+    
+    async def run():
+        if not await shell.connect():
+            return
+        
+        try:
+            console.print(Panel.fit(
+                "[bold cyan]🎤 Voice Assistant Activated[/bold cyan]\n\n"
+                f"Recording duration: {duration}s per turn\n"
+                f"Mode: {'Continuous' if continuous else 'Single turn'}\n"
+                f"Language: {language or 'Auto-detect'}\n"
+                f"Wake word: {'Enabled' if wake_word else 'Disabled'}\n\n"
+                "[dim]Speak your command after the beep...[/dim]",
+                title="Neuralux Assistant"
+            ))
+            
+            conversation_history = []
+            turn = 0
+            
+            while True:
+                turn += 1
+                console.print(f"\n[bold]{'─' * 70}[/bold]")
+                console.print(f"[bold cyan]Turn {turn}[/bold cyan]")
+                
+                # Step 1: Listen for voice input
+                console.print("\n[yellow]🎤 Listening...[/yellow]")
+                await shell.speak("I'm listening")
+                
+                import pyaudio
+                import wave
+                import tempfile
+                
+                # Record audio
+                audio_format = pyaudio.paInt16
+                channels = 1
+                rate = 16000
+                chunk = 1024
+                
+                p = pyaudio.PyAudio()
+                stream = p.open(
+                    format=audio_format,
+                    channels=channels,
+                    rate=rate,
+                    input=True,
+                    frames_per_buffer=chunk
+                )
+                
+                frames = []
+                console.print(f"[green]Recording for {duration} seconds... Speak now![/green]")
+                
+                for _ in range(0, int(rate / chunk * duration)):
+                    data = stream.read(chunk, exception_on_overflow=False)
+                    frames.append(data)
+                
+                stream.stop_stream()
+                stream.close()
+                p.terminate()
+                
+                # Save to temp file
+                with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
+                    temp_path = f.name
+                
+                wf = wave.open(temp_path, "wb")
+                wf.setnchannels(channels)
+                wf.setsampwidth(p.get_sample_size(audio_format))
+                wf.setframerate(rate)
+                wf.writeframes(b"".join(frames))
+                wf.close()
+                
+                # Step 2: Transcribe
+                console.print("[yellow]🔄 Transcribing...[/yellow]")
+                
+                import base64
+                with open(temp_path, "rb") as f:
+                    audio_data = base64.b64encode(f.read()).decode()
+                
+                os.unlink(temp_path)
+                
+                stt_request = {
+                    "audio_data": audio_data,
+                    "language": language if language else "en",  # Default to English if not specified
+                    "vad_filter": False  # Disable VAD for better capture in voice assistant
+                }
+                
+                stt_response = await shell.message_bus.request(
+                    "ai.audio.stt",
+                    stt_request,
+                    timeout=30.0
+                )
+                
+                if "error" in stt_response:
+                    console.print(f"[red]STT Error: {stt_response['error']}[/red]")
+                    await shell.speak("Sorry, I couldn't understand you")
+                    if not continuous:
+                        break
+                    continue
+                
+                user_text = stt_response.get("text", "").strip()
+                detected_lang = stt_response.get("language", "unknown")
+                
+                if not user_text:
+                    console.print("[yellow]No speech detected[/yellow]")
+                    await shell.speak("I didn't hear anything")
+                    if not continuous:
+                        break
+                    continue
+                
+                console.print(f"\n[bold green]You said:[/bold green] {user_text}")
+                console.print(f"[dim](Language: {detected_lang})[/dim]")
+                
+                # Check for exit commands (expanded list)
+                exit_keywords = [
+                    "exit", "quit", "goodbye", "good bye", "bye", "stop", 
+                    "au revoir", "adieu", "bye bye", "end", "finish", "close"
+                ]
+                if any(keyword in user_text.lower() for keyword in exit_keywords):
+                    console.print("\n[cyan]Goodbye![/cyan]")
+                    await shell.speak("Goodbye! Have a great day!")
+                    break
+                
+                # Step 3: Process with LLM
+                console.print("[yellow]🤔 Thinking...[/yellow]")
+                
+                # Try to get a command suggestion first
+                suggested_command = await shell.ask_llm(user_text, mode="command")
+                
+                # Check if this looks like an actionable command request
+                is_command_request = any(word in user_text.lower() for word in [
+                    "show", "list", "find", "search", "create", "delete", "run",
+                    "execute", "check", "get", "display", "open", "edit", "install"
+                ])
+                
+                if is_command_request and suggested_command and not suggested_command.startswith("Error"):
+                    # We have a command to execute
+                    # Clean up markdown backticks from LLM response
+                    clean_suggested_command = suggested_command.strip().strip('`').strip()
+                    assistant_text = f"I'll run the command: {clean_suggested_command}. Should I proceed?"
+                    needs_approval = True
+                    pending_command = clean_suggested_command
+                else:
+                    # Regular conversation - no command needed
+                    needs_approval = False
+                    pending_command = None
+                    
+                    # Build conversation messages
+                    messages = [
+                        {
+                            "role": "system",
+                            "content": "You are Neuralux, a helpful voice-activated AI assistant for Linux. Provide concise, natural responses suitable for text-to-speech. Keep responses under 50 words for voice interaction."
+                        }
+                    ]
+                    
+                    # Add conversation history (last 3 turns)
+                    for i, msg in enumerate(conversation_history[-6:]):
+                        role = "user" if i % 2 == 0 else "assistant"
+                        messages.append({"role": role, "content": msg})
+                    
+                    # Add current user input
+                    messages.append({"role": "user", "content": user_text})
+                    
+                    llm_request = {
+                        "messages": messages,
+                        "max_tokens": 150,
+                        "temperature": 0.7,
+                        "stream": False
+                    }
+                    
+                    llm_response = await shell.message_bus.request(
+                        "ai.llm.request",
+                        llm_request,
+                        timeout=30.0
+                    )
+                    
+                    if "error" in llm_response:
+                        console.print(f"[red]LLM Error: {llm_response['error']}[/red]")
+                        await shell.speak("Sorry, I'm having trouble thinking right now")
+                        if not continuous:
+                            break
+                        continue
+                    
+                    assistant_text = llm_response.get("content", "").strip()
+                
+                console.print(f"\n[bold blue]Assistant:[/bold blue] {assistant_text}")
+                
+                # Add to conversation history
+                conversation_history.append(user_text)
+                conversation_history.append(assistant_text)
+                
+                # Step 4: Speak response
+                console.print("[yellow]🔊 Speaking...[/yellow]")
+                await shell.speak(assistant_text)
+                
+                # Check if command approval is needed
+                if needs_approval and pending_command:
+                    console.print("\n[yellow]Waiting for approval...[/yellow]")
+                    await shell.speak("Should I proceed? Say yes or no")
+                    
+                    # Record approval response
+                    console.print("[green]Recording approval (3 seconds)...[/green]")
+                    
+                    p = pyaudio.PyAudio()
+                    stream = p.open(
+                        format=audio_format,
+                        channels=channels,
+                        rate=rate,
+                        input=True,
+                        frames_per_buffer=chunk
+                    )
+                    
+                    frames = []
+                    for _ in range(0, int(rate / chunk * 3)):
+                        data = stream.read(chunk, exception_on_overflow=False)
+                        frames.append(data)
+                    
+                    stream.stop_stream()
+                    stream.close()
+                    p.terminate()
+                    
+                    with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
+                        temp_path = f.name
+                    
+                    wf = wave.open(temp_path, "wb")
+                    wf.setnchannels(channels)
+                    wf.setsampwidth(p.get_sample_size(audio_format))
+                    wf.setframerate(rate)
+                    wf.writeframes(b"".join(frames))
+                    wf.close()
+                    
+                    with open(temp_path, "rb") as f:
+                        audio_data = base64.b64encode(f.read()).decode()
+                    
+                    os.unlink(temp_path)
+                    
+                    approval_response = await shell.message_bus.request(
+                        "ai.audio.stt",
+                        {
+                            "audio_data": audio_data,
+                            "language": language if language else "en",
+                            "vad_filter": False
+                        },
+                        timeout=30.0
+                    )
+                    
+                    approval_text = approval_response.get("text", "").strip().lower()
+                    console.print(f"\n[bold]Approval response:[/bold] {approval_text}")
+                    
+                    if "yes" in approval_text or "oui" in approval_text or "yeah" in approval_text:
+                        console.print("[green]✓ Approved![/green]")
+                        await shell.speak("Okay, executing now")
+                        
+                        # Execute the command
+                        try:
+                            console.print(f"\n[bold cyan]$ {pending_command}[/bold cyan]")
+                            
+                            result = subprocess.run(
+                                pending_command,
+                                shell=True,
+                                capture_output=True,
+                                text=True,
+                                timeout=30,
+                                cwd=shell.context['cwd']
+                            )
+                            
+                            output = result.stdout.strip()
+                            error = result.stderr.strip()
+                            
+                            if result.returncode == 0:
+                                # Success
+                                console.print(output if output else "[dim]Command completed successfully[/dim]")
+                                
+                                # Speak a summary of the output
+                                if output:
+                                    # Get first few lines for voice output
+                                    lines = output.split('\n')[:3]
+                                    if len(lines) > 3:
+                                        summary = f"Here are the first results: {' '.join(lines)}. There are more results shown on screen."
+                                    else:
+                                        summary = f"The results are: {' '.join(lines)}"
+                                    await shell.speak(summary)
+                                else:
+                                    await shell.speak("Command completed successfully")
+                            else:
+                                # Error
+                                console.print(f"[red]Error (exit code {result.returncode}):[/red]")
+                                if error:
+                                    console.print(error)
+                                await shell.speak(f"Command failed with error: {error[:100]}")
+                                
+                        except subprocess.TimeoutExpired:
+                            console.print("[red]Command timed out after 30 seconds[/red]")
+                            await shell.speak("Command timed out")
+                        except Exception as e:
+                            console.print(f"[red]Error executing command: {e}[/red]")
+                            await shell.speak(f"Error executing command: {str(e)[:100]}")
+                    else:
+                        console.print("[red]✗ Denied[/red]")
+                        await shell.speak("Okay, I won't do that")
+                
+                if not continuous:
+                    console.print("\n[cyan]Single turn complete. Use -c for continuous mode.[/cyan]")
+                    break
+                
+                console.print("\n[dim]Press Ctrl+C to exit continuous mode[/dim]")
+        
+        except KeyboardInterrupt:
+            console.print("\n\n[cyan]Voice assistant stopped[/cyan]")
+            await shell.speak("Goodbye")
+        
+        except Exception as e:
+            console.print(f"\n[red]Error: {e}[/red]")
+            import traceback
+            traceback.print_exc()
+        
+        finally:
+            await shell.disconnect()
+    
+    asyncio.run(run())
+
 
 def main():
     """Main entry point."""
