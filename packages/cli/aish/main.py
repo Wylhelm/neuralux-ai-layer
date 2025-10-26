@@ -20,6 +20,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent / "common"))
 
 from neuralux.config import NeuraluxConfig
 from neuralux.messaging import MessageBusClient
+from neuralux.memory import SessionStore, default_session_id
 
 console = Console()
 
@@ -38,6 +39,73 @@ class AIShell:
         }
         # Default interaction mode: 'command' or 'chat'
         self.chat_mode = "command"
+
+    async def ocr(self, file_path: Optional[str] = None, region: Optional[str] = None, window: bool = False, language: Optional[str] = None) -> dict:
+        """Run OCR via vision service. Region format: x,y,w,h. Window best-effort via screengrab."""
+        if not self.message_bus:
+            return {"error": "Not connected to message bus"}
+
+        img_b64: Optional[str] = None
+        if file_path:
+            # Prefer sending path (let service open file)
+            request = {"image_path": file_path, "language": language}
+        else:
+            # Capture region or window to image bytes
+            try:
+                from mss import mss  # type: ignore
+                import numpy as np  # type: ignore
+                from PIL import Image  # type: ignore
+
+                with mss() as sct:
+                    monitor = sct.monitors[1]  # primary monitor
+                    bbox = {
+                        "top": monitor["top"],
+                        "left": monitor["left"],
+                        "width": monitor["width"],
+                        "height": monitor["height"],
+                    }
+                    if window:
+                        # Best-effort: use xdotool to get active window geometry
+                        try:
+                            import subprocess as _sp
+                            out = _sp.check_output(["bash", "-lc", "xdotool getactivewindow getwindowgeometry --shell"], stderr=_sp.DEVNULL, text=True)
+                            env = {}
+                            for line in out.splitlines():
+                                if "=" in line:
+                                    k, v = line.split("=", 1)
+                                    env[k.strip()] = v.strip()
+                            x = int(env.get("X", "0"))
+                            y = int(env.get("Y", "0"))
+                            w = int(env.get("WIDTH", str(monitor["width"])) )
+                            h = int(env.get("HEIGHT", str(monitor["height"])) )
+                            bbox = {"left": x, "top": y, "width": w, "height": h}
+                        except Exception:
+                            # Fallback to full screen
+                            pass
+                    if region:
+                        try:
+                            x, y, w, h = [int(v) for v in region.split(",")]
+                            bbox = {"left": x, "top": y, "width": w, "height": h}
+                        except Exception:
+                            return {"error": "Invalid region format. Use x,y,w,h"}
+                    # TODO: window capture best-effort can be added later; for now region/fullscreen
+                    shot = sct.grab(bbox)
+                    img = Image.frombytes("RGB", shot.size, shot.rgb)
+                    import base64
+                    from io import BytesIO
+                    buf = BytesIO()
+                    img.save(buf, format="PNG")
+                    img_b64 = base64.b64encode(buf.getvalue()).decode()
+            except Exception as e:
+                return {"error": f"Screen capture failed: {e}"}
+            request = {"image_bytes_b64": img_b64, "language": language}
+
+        try:
+            # NATS request path
+            response = await self.message_bus.request("ai.vision.ocr.request", request, timeout=20.0)
+            return response
+        except Exception as e:
+            return {"error": str(e)}
     
     async def connect(self):
         """Connect to the message bus."""
@@ -673,6 +741,32 @@ def cli(ctx):
 
 
 @cli.command()
+@click.option("--file", "file_path", type=click.Path(exists=True, dir_okay=False), help="Image file to OCR")
+@click.option("--region", type=str, help="Screen region x,y,w,h to OCR")
+@click.option("--window", is_flag=True, help="OCR active window (best-effort)")
+@click.option("--lang", "language", type=str, help="Language hint (e.g., en, fr)")
+def ocr(file_path, region, window, language):
+    """Run OCR on a file, screen region, or active window and print text."""
+    shell = AIShell()
+
+    async def run():
+        if await shell.connect():
+            try:
+                result = await shell.ocr(file_path=file_path, region=region, window=window, language=language)
+                if "error" in result:
+                    console.print(f"[red]Error:[/red] {result['error']}")
+                    return
+                text = result.get("text", "")
+                if not text:
+                    console.print("[yellow]No text detected.[/yellow]")
+                else:
+                    console.print(text)
+            finally:
+                await shell.disconnect()
+
+    asyncio.run(run())
+
+@cli.command()
 @click.argument("query", nargs=-1, required=True)
 @click.option("--open", "open_first", is_flag=True, help="Open top result in browser (approval asked)")
 @click.option("--limit", "limit", default=5, help="Max results to list")
@@ -1288,6 +1382,11 @@ def overlay(hotkey: bool, tray: bool, toggle: bool, show: bool, hide: bool):
     state = {
         "tts_enabled": bool(getattr(config, "tts_enabled_default", False)),
         "pending": None,  # {type: 'command'|'open', data: {...}}
+        "last_ocr_text": "",
+        "chat_mode": False,
+        "chat_history": [],  # list of {role, content}
+        "context_text": "",
+        "context_kind": "",
     }
 
     # If control flags are provided, send the appropriate message and exit.
@@ -1328,11 +1427,90 @@ def overlay(hotkey: bool, tray: bool, toggle: bool, show: bool, hide: bool):
     # Async command handler that queries LLM and shows minimal status
     async def handle_query(text: str):
         shell = AIShell()
+        # Session store shared across CLI/overlay
+        from neuralux.memory import SessionStore, default_session_id
+        store = SessionStore(NeuraluxConfig())
+        session_id = default_session_id()
         try:
             if not await shell.connect():
                 return "Message bus not available"
             # Handle built-in overlay commands
             t = text.strip()
+            if t.startswith("/ocr"):
+                # Parse: /ocr, /ocr window, /ocr region x,y,w,h
+                mode = ""
+                parts = t.split()
+                if len(parts) >= 2:
+                    mode = parts[1].lower()
+                region = None
+                window = False
+                if mode == "window":
+                    window = True
+                elif mode == "region" and len(parts) >= 3:
+                    region = parts[2]
+                # If we own the overlay window, hide it briefly to avoid capturing itself
+                try:
+                    from overlay.overlay_window import OverlayApplication  # type: ignore
+                    if app and app.window and hasattr(app.window, "hide_overlay"):
+                        app.window.hide_overlay()
+                except Exception:
+                    pass
+                # Brief delay to allow WM to update
+                await asyncio.sleep(0.12)
+                result = await shell.ocr(file_path=None, region=region, window=window)
+                # Reshow overlay
+                try:
+                    from overlay.overlay_window import OverlayApplication  # type: ignore
+                    if app and app.window and hasattr(app.window, "show_overlay"):
+                        app.window.show_overlay()
+                except Exception:
+                    pass
+                if "error" in result:
+                    return f"OCR error: {result.get('error')}"
+                ocr_text = result.get("text", "") or ""
+                import base64 as _b64
+                b64 = _b64.b64encode(ocr_text.encode()).decode() if ocr_text else ""
+                state["last_ocr_text"] = ocr_text
+                # Save as context for shared session
+                data = store.load(session_id)
+                data.update({
+                    "context_text": ocr_text,
+                    "context_kind": "ocr",
+                })
+                store.save(session_id, data)
+                return {"_overlay_render": "ocr_result", "text": ocr_text, "b64": b64}
+            if t == "/start_chat":
+                ctx = (state.get("context_text") or state.get("last_ocr_text") or "").strip()
+                if not ctx:
+                    return "No context available. Run /ocr or open results first."
+                # Initialize chat history with a system prompt that references the context
+                state["chat_history"] = [
+                    {
+                        "role": "system",
+                        "content": (
+                            "You are a helpful Linux assistant. Use the following context as background.\n"
+                            "If the user asks follow-ups, reason with the context but don't re-quote it unless needed.\n\n"
+                            f"Context (kind={state.get('context_kind') or 'generic'}):\n{ctx}"
+                        ),
+                    }
+                ]
+                state["chat_mode"] = True
+                # Persist context + history
+                data = store.load(session_id)
+                data.update({
+                    "context_text": ctx,
+                    "context_kind": state.get("context_kind") or "generic",
+                    "chat_history": state.get("chat_history") or [],
+                })
+                store.save(session_id, data)
+                return "Chat started. Ask a follow-up. Use /fresh to reset."
+            if t in ("/fresh", "/reset"):
+                state["chat_mode"] = False
+                state["chat_history"] = []
+                state["context_text"] = ""
+                state["context_kind"] = ""
+                store.reset(session_id)
+                return "Session cleared."
             if t.startswith("/tts"):
                 parts = t.split()
                 sub = parts[1].lower() if len(parts) > 1 else "toggle"
@@ -1348,6 +1526,50 @@ def overlay(hotkey: bool, tray: bool, toggle: bool, show: bool, hide: bool):
                 except Exception:
                     pass
                 return f"Auto TTS: {'ON' if state['tts_enabled'] else 'OFF'}"
+            if t.startswith("/copy ") or t == "/copy":
+                txt = t[len("/copy "):].strip() if t.startswith("/copy ") else state.get("last_ocr_text", "")
+                if not txt:
+                    return "Nothing to copy"
+                try:
+                    import subprocess as _sp
+                    p = _sp.Popen(["xclip", "-selection", "clipboard"], stdin=_sp.PIPE)
+                    p.communicate(input=txt.encode())
+                    return "Copied to clipboard"
+                except Exception:
+                    return txt  # Fallback: show text to copy manually
+            if t.startswith("/save "):
+                path = t[len("/save "):].strip()
+                content = state.get("last_ocr_text", "")
+                if not path or not content:
+                    return "Usage: /save <path> after running /ocr"
+                try:
+                    Path(path).write_text(content)
+                    return f"Saved to {path}"
+                except Exception as e:
+                    return f"Save error: {e}"
+            if t == "/summarize":
+                txt = state.get("last_ocr_text", "")
+                if not txt:
+                    return "Run /ocr first"
+                prompt = f"Summarize the following text in bullet points:\n\n{txt}"
+                return await shell.ask_llm(prompt, mode="chat")
+            if t.startswith("/translate"):
+                parts = t.split()
+                target = parts[1] if len(parts) > 1 else "en"
+                txt = state.get("last_ocr_text", "")
+                if not txt:
+                    return "Run /ocr first"
+                prompt = f"Translate the following text to {target}:\n\n{txt}"
+                return await shell.ask_llm(prompt, mode="chat")
+            if t in ("/extract", "/extract table"):
+                txt = state.get("last_ocr_text", "")
+                if not txt:
+                    return "Run /ocr first"
+                prompt = (
+                    "Extract any tables from the text as CSV. "
+                    "If no tables, extract key-value pairs in CSV.\n\n" + txt
+                )
+                return await shell.ask_llm(prompt, mode="chat")
             if t.startswith("/web "):
                 q = t[len("/web "):].strip()
                 results = await AIShell().web_search(q, num_results=5)
@@ -1550,6 +1772,30 @@ def overlay(hotkey: bool, tray: bool, toggle: bool, show: bool, hide: bool):
                     return {"_overlay_render": "health", "data": summary}
                 except Exception as e:
                     return f"Health error: {e}"
+            # Chat mode: route plain text to conversational LLM with history
+            if state.get("chat_mode") and not text.strip().startswith("/"):
+                # Load history from store to keep parity across instances
+                data = store.load(session_id)
+                messages = list(data.get("chat_history") or state.get("chat_history") or [])
+                messages.append({"role": "user", "content": text})
+                try:
+                    req = {"messages": messages, "temperature": 0.4, "max_tokens": 600}
+                    response = await shell.message_bus.request("ai.llm.request", req, timeout=30.0)
+                    content = response.get("content", "") if isinstance(response, dict) else str(response)
+                    # Update history
+                    new_hist = messages + [{"role": "assistant", "content": content}]
+                    state["chat_history"] = new_hist
+                    data["chat_history"] = new_hist
+                    store.save(session_id, data)
+                    if state["tts_enabled"] and content:
+                        try:
+                            await shell.speak(content[:220])
+                        except Exception:
+                            pass
+                    return content
+                except Exception as e:
+                    return f"Chat error: {e}"
+
             response = await shell.ask_llm(text, mode="command")
             # If we received a plausible command, set pending approval like voice mode
             if isinstance(response, str) and response and not response.startswith("Error"):
@@ -1701,6 +1947,31 @@ def overlay(hotkey: bool, tray: bool, toggle: bool, show: bool, hide: bool):
                         pending = result.get("pending")
                         if pending and pending.get("type") == "open":
                             app.window.show_pending_action("Open top web result?", pending.get("path", ""))
+                    elif isinstance(result, dict) and result.get("_overlay_render") == "ocr_result":
+                        text = result.get("text", "") or ""
+                        # Set conversational context from OCR
+                        state["context_text"] = text
+                        state["context_kind"] = "ocr"
+                        app.window.add_result("OCR Result", text)
+                        # Buttons for common actions
+                        if hasattr(app.window, "add_buttons_row"):
+                            app.window.add_buttons_row(
+                                "Quick actions",
+                                [
+                                    ("Copy", "/copy"),
+                                    ("Summarize", "/summarize"),
+                                    ("Translate EN", "/translate en"),
+                                    ("Translate FR", "/translate fr"),
+                                    ("Extract table", "/extract"),
+                                ],
+                            )
+                            app.window.add_buttons_row(
+                                "Session",
+                                [
+                                    ("Continue chat", "/start_chat"),
+                                    ("Start fresh", "/fresh"),
+                                ],
+                            )
                     else:
                         app.window.add_result("Result", result if isinstance(result, str) else str(result))
                     app.window.set_status("Done")

@@ -60,6 +60,16 @@ def suggest(query: str, max_results: int = 7, threshold: int = 40) -> List[Sugge
             "Show current CPU, memory, disks and alerts",
             {"type": "health_summary"},
         ),
+        (
+            "OCR active window",
+            "Recognize text from the current active window",
+            {"type": "overlay_command", "command": "/ocr window"},
+        ),
+        (
+            "OCR and continue chat",
+            "Capture window text then enter follow-up chat",
+            {"type": "sequence", "commands": ["/ocr window", "/start_chat"]},
+        ),
     ]
 
     scored = [

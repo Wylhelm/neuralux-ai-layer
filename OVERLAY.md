@@ -85,4 +85,28 @@ export OVERLAY_TRAY_ICON="$PWD/packages/overlay/assets/neuralux-tray.svg"
 - Approvals: When an action is detected (run a command, open a file/URL), the overlay shows an Approve/Cancel bar; actions run only after explicit approval.
 - Web search: Type `/web <query>` or say “search the web for <query>” to list web results with summaries. Click a result to queue it, then Approve to open in your default browser.
 
+## OCR and Quick Actions
+
+- OCR active window: Select “OCR active window” in suggestions or type `/ocr window`. The overlay hides briefly, captures the active window, runs OCR, then shows the recognized text.
+- Quick action buttons appear under the OCR result:
+  - Copy, Summarize, Translate (EN/FR), Extract table, Continue chat, Start fresh
+- Continue chat keeps the OCR text as context for follow-ups; Start fresh clears the session.
+
+Requirements:
+```bash
+sudo apt install -y tesseract-ocr libgl1 libglib2.0-0 xdotool wmctrl
+source ~/NeuroTuxLayer/myenv/bin/activate
+pip install -r ~/NeuroTuxLayer/requirements.txt
+```
+
+Notes:
+- PaddleOCR is used if available (faster, higher accuracy); Tesseract is the fallback.
+- On Wayland, active-window capture may vary; region OCR is available via `--region x,y,w,h` in CLI.
+
+## Session Memory (Shared)
+
+- The overlay and CLI share a Redis-backed session (per user@hostname, 24h TTL).
+- Use “Continue chat” to start a contextual conversation; “Start fresh” clears the session.
+- Configure Redis in `packages/common/neuralux/config.py` (default `redis://localhost:6379`).
+
 

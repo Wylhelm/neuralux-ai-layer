@@ -98,6 +98,22 @@ aish overlay --hide          # Hide overlay instance
 
 See `OVERLAY.md` for Wayland tips, tray setup, and troubleshooting.
 
+#### Overlay OCR and Actions
+```bash
+# CLI
+aish ocr --file /path/to/image.png
+aish ocr --region 100,200,800,400
+aish ocr --window
+
+# Overlay
+# Select "OCR active window" in suggestions or type: /ocr window
+# Then use buttons: Copy, Summarize, Translate, Extract table, Continue chat, Start fresh
+```
+
+Shared session memory (24h)
+- Continue chat and Start fresh manage a Redis-backed session shared with CLI.
+- Configure Redis URL in `packages/common/neuralux/config.py`.
+
 ### Voice Commands
 ```bash
 # Voice Assistant (Interactive conversation)

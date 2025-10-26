@@ -115,9 +115,13 @@ This document describes the current state of the Neuralux AI Layer implementatio
 └────────┬──────────────────────────┬─────────────────────┘
          │                          │
 ┌────────┴──────────┐    ┌─────────┴──────────┐
-│   LLM Service     │    │  Future Services   │
-│   (llama.cpp)     │    │  - Vision          │
-│   Port: 8000      │    │  - Audio           │
+│   LLM Service     │    │  Vision Service    │
+│   (llama.cpp)     │    │  (OCR)             │
+│   Port: 8000      │    │  Port: 8005        │
+│                   │    │  NATS: ai.vision.* │
+│                   │    │                    │
+│                   │    │  Audio Service     │
+│                   │    │  Port: 8006        │
 │                   │    │  - Filesystem      │
 └────────┬──────────┘    └────────────────────┘
          │
@@ -142,6 +146,8 @@ Implemented:
 - `ai.audio.vad` - Voice activity detection
 - `ai.audio.info` - Audio service information
 - `system.health.summary` - Current health snapshot and alerts
+- `ai.vision.ocr.request` - OCR request/reply
+- `ai.vision.ocr.result` - OCR result broadcast
 
 Notes:
 - Health summary includes NVIDIA GPU metrics (utilization %, VRAM, temperature, power) when NVML is available.
@@ -242,7 +248,11 @@ NeuroTuxLayer/
   - Text-to-speech with Piper
   - Voice activity detection with Silero VAD
   - CLI commands: `aish listen`, `aish speak`
-- [ ] Vision service (OCR, screen understanding)
+- [x] Vision service (OCR MVP)
+  - REST: POST /v1/ocr
+  - NATS: ai.vision.ocr.request / ai.vision.ocr.result
+  - Overlay: OCR active window, Quick Actions (Copy, Summarize, Translate, Extract), Continue chat/Start fresh
+  - Shared session memory via Redis (24h TTL)
 - [ ] Temporal intelligence system
 
 ### Phase 3 (Advanced Features)

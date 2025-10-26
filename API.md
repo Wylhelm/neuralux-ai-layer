@@ -121,3 +121,45 @@ aish overlay --hide
 ## Web Search (CLI/Overlay)
 
 The `aish` shell provides a `/web <query>` command and the overlay supports `/web` and voice phrases like “search the web for <query>”. Results show title, URL, and summary; opening a URL requires explicit approval in the overlay.
+
+## Vision Service (OCR)
+
+### REST
+
+- POST `/v1/ocr` → Run OCR on an image path or base64 image
+
+Request:
+```json
+{
+  "image_path": "/path/to/image.png",   // optional, file path
+  "image_bytes_b64": "...",             // optional, base64 PNG/JPEG
+  "language": "en"                      // optional, hint (e.g. "en", "fr")
+}
+```
+
+Response:
+```json
+{
+  "text": "recognized text...",
+  "confidence": 0.93,             // average when available
+  "words": ["token1", "token2"]  // optional
+}
+```
+
+Notes:
+- Primary engine: PaddleOCR (if installed); fallback: Tesseract
+- GPU acceleration is supported via PaddlePaddle GPU builds where available
+
+### NATS Subjects
+
+- `ai.vision.ocr.request` → Request/Reply OCR
+- `ai.vision.ocr.result` → Published after each handled OCR request (fire-and-forget)
+
+Example (Python):
+```python
+resp = await message_bus.request("ai.vision.ocr.request", {
+    "image_path": "/tmp/screenshot.png",
+    "language": "en"
+}, timeout=20.0)
+text = resp.get("text", "")
+```

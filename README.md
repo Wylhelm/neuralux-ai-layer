@@ -168,6 +168,23 @@ export OVERLAY_TRAY_ICON="$PWD/packages/overlay/assets/neuralux-tray.svg"
 aish overlay --tray
 ```
 
+### OCR and Overlay Actions
+
+```bash
+# CLI OCR
+aish ocr --file /path/to/image.png
+aish ocr --region 100,200,800,400
+aish ocr --window
+
+# Overlay OCR
+# In overlay suggestions, pick "OCR active window" or type: /ocr window
+# Then use buttons under the result: Copy, Summarize, Translate, Extract table, Continue chat, Start fresh
+```
+
+Contextual chat & session memory
+- After OCR, click “Continue chat” to ask follow-ups with the OCR text as context.
+- “Start fresh” clears the session. Sessions are shared across overlay and CLI via Redis (24h TTL).
+
 ### Monitor System Health
 
 ```bash

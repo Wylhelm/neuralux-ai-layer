@@ -10,7 +10,7 @@
 
 ## 📊 Development Progress
 
-**Last Updated**: October 25, 2025
+**Last Updated**: October 26, 2025
 
 ### Overall Status: Phase 2A (MVP complete + desktop packaging)
 
@@ -18,7 +18,7 @@
 |-------|--------|----------|-----------------|
 | Phase 1: Foundation | ✅ Complete | 8/8 (100%) | October 2025 |
 | Phase 2A: Intelligence | 🚧 In Progress | MVP + Desktop packaging | In Progress |
-| Phase 2B: Advanced Intelligence | 🚧 In Progress | 1/4 (25%) | In Progress |
+| Phase 2B: Advanced Intelligence | 🚧 In Progress | 2/4 (50%) | In Progress |
 | Phase 3: Advanced Features | ⏳ Planned | 0/5 (0%) | Future |
 | Phase 4: Optimization | ⏳ Planned | 0/4 (0%) | Future |
 
@@ -56,11 +56,12 @@
   - Makefile desktop targets (`make desktop`, `make autostart`) ✅
   - Voice controls (mic/speaker), auto TTS toggle, approvals for actions ✅
   - Web search in overlay (`/web` + voice “search the web …”), approval to open URLs ✅
+  - OCR actions with buttons (Copy/Summarize/Translate/Extract), Continue chat/Start fresh ✅
 
 ### Next Priorities
 
 1. Voice interface (STT/TTS)
-2. Vision service (OCR, screen understanding)
+2. Vision service (OCR complete; screen understanding next)
 3. Temporal intelligence (system history)
 
 For detailed progress, see: [PHASE2A_PROGRESS.md](PHASE2A_PROGRESS.md)
@@ -154,6 +155,14 @@ capabilities:
     - PaddleOCR (primary)
     - TesseractOCR (fallback)
     - RapidOCR (lightweight)
+overlay:
+  - actions:
+      - ocr_active_window
+      - quick_buttons: [copy, summarize, translate_en, translate_fr, extract_table]
+      - session_controls: [start_chat, start_fresh]
+  - session_memory:
+      - backend: Redis
+      - ttl: 24h
   screen_understanding:
     - LayoutLMv3 (document understanding)
     - OWLv2 (object detection)
@@ -547,7 +556,7 @@ goals:
   - Enhanced automation
 deliverables:
   - Vision service skeleton with OCR endpoint and NATS stubs ✅
-  - Vision service with OCR
+  - Vision service with OCR ✅
   - Voice assistant daemon (overlay controls implemented; wake word pending)
   - Temporal query system
   - Advanced automation rules

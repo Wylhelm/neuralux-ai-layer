@@ -302,6 +302,23 @@ class OverlayWindow(Gtk.ApplicationWindow):
                     path = payload.get("path", "")
                     if path:
                         self.on_command(f"/queue_open {path}")
+                elif action_type == "overlay_command":
+                    # Run a raw overlay command string (e.g., /copy, /summarize)
+                    cmd = payload.get("command", "").strip()
+                    if cmd:
+                        self.on_command(cmd)
+                elif action_type == "sequence":
+                    # Run a sequence of commands in order (best-effort)
+                    cmds = payload.get("commands") or []
+                    try:
+                        for c in cmds:
+                            if isinstance(c, str) and c.strip():
+                                self.on_command(c)
+                    except Exception:
+                        pass
+                elif action_type == "ocr_action":
+                    # Dispatch to run OCR via CLI backend
+                    self.on_command("/ocr window")
                 else:
                     self.on_command(str(payload))
             except Exception:
@@ -527,6 +544,31 @@ class OverlayWindow(Gtk.ApplicationWindow):
             if row is None:
                 break
             self.results_list.remove(row)
+
+    def add_buttons_row(self, title: str, buttons: list[tuple[str, str]]):
+        """Add a row with a title and a horizontal list of clickable buttons.
+        Each button is defined as (label, command_string) and will dispatch via on_command.
+        """
+        row = Gtk.ListBoxRow()
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+
+        title_label = Gtk.Label()
+        title_label.set_markup(f"<b>{title}</b>")
+        title_label.set_halign(Gtk.Align.START)
+        box.append(title_label)
+
+        btn_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        for label, cmd in buttons:
+            btn = Gtk.Button(label=label)
+            try:
+                btn.connect("clicked", lambda _b, c=cmd: self.on_command(c))
+            except Exception:
+                pass
+            btn_box.append(btn)
+        box.append(btn_box)
+
+        row.set_child(box)
+        self.results_list.append(row)
     
     def set_status(self, text: str):
         """Set status bar text."""

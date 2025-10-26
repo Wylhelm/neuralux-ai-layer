@@ -64,6 +64,15 @@ aiofiles>=23.2.1
 httpx>=0.26.0
 tenacity>=8.2.3
 structlog>=24.1.0
+redis>=5.0.0
+
+# Vision / OCR
+Pillow>=10.0.0
+opencv-python-headless>=4.10.0.84
+pytesseract>=0.3.10
+PaddlePaddle>=2.6.1; platform_system == "Linux"
+paddleocr>=2.7.0
+mss>=9.0.1
 
 # Development
 pytest>=7.4.0

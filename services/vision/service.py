@@ -3,7 +3,7 @@
 import sys
 from pathlib import Path
 import structlog
-from fastapi import FastAPI
+from fastapi import FastAPI, UploadFile, File, HTTPException
 
 # Add common package to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "packages" / "common"))
@@ -14,6 +14,11 @@ from neuralux.messaging import MessageBusClient
 
 from config import VisionServiceConfig
 from models import OCRRequest, OCRResponse
+from ocr_backend import OCRProcessor
+from typing import Optional
+import base64
+from io import BytesIO
+from PIL import Image
 
 
 logger = structlog.get_logger(__name__)
@@ -24,6 +29,7 @@ class VisionService:
         self.config = VisionServiceConfig()
         self.neuralux_config = NeuraluxConfig()
         self.message_bus = MessageBusClient(self.neuralux_config)
+        self.ocr = OCRProcessor()
 
         self.app = FastAPI(
             title="Neuralux Vision Service",
@@ -39,16 +45,43 @@ class VisionService:
 
         async def _ocr_handler(data: dict) -> dict:
             try:
-                _ = OCRRequest(**data)
-                # Placeholder implementation
-                return OCRResponse(text="(vision skeleton: OCR not implemented)").model_dump()
+                req = OCRRequest(**data)
+                img: Optional[Image.Image] = None
+                if req.image_path:
+                    try:
+                        img = Image.open(req.image_path)
+                    except Exception as e:
+                        return {"error": f"Failed to open image: {e}"}
+                elif req.image_bytes_b64:
+                    try:
+                        raw = base64.b64decode(req.image_bytes_b64)
+                        img = Image.open(BytesIO(raw))
+                    except Exception as e:
+                        return {"error": f"Invalid image bytes: {e}"}
+                else:
+                    return {"error": "No image provided"}
+
+                result = self.ocr.run(img, language=req.language)
+                if result.get("error"):
+                    return {"error": result.get("error")}
+                response = OCRResponse(
+                    text=result.get("text", ""),
+                    confidence=result.get("confidence"),
+                    words=result.get("words") or None,
+                ).model_dump()
+                # Also publish the result for listeners
+                try:
+                    await self.message_bus.publish(f"{prefix}.ocr.result", {"request": req.model_dump(), "response": response})
+                except Exception:
+                    pass
+                return response
             except Exception as e:
                 return {"error": str(e)}
 
         async def _info_handler(_data: dict) -> dict:
             return {"service": self.config.service_name, "version": "0.1.0", "status": "running"}
 
-        await self.message_bus.reply_handler(f"{prefix}.ocr", _ocr_handler)
+        await self.message_bus.reply_handler(f"{prefix}.ocr.request", _ocr_handler)
         await self.message_bus.reply_handler(f"{prefix}.info", _info_handler)
 
         logger.info("Vision service connected to NATS and handlers registered")
@@ -61,10 +94,29 @@ class VisionService:
         async def read_root():
             return {"service": self.config.service_name, "version": "0.1.0", "status": "running"}
 
-        @self.app.post("/ocr")
+        @self.app.post("/v1/ocr")
         async def ocr(request: OCRRequest) -> OCRResponse:
-            # Placeholder HTTP endpoint
-            return OCRResponse(text="(vision skeleton: OCR not implemented)")
+            try:
+                img: Optional[Image.Image] = None
+                if request.image_path:
+                    img = Image.open(request.image_path)
+                elif request.image_bytes_b64:
+                    raw = base64.b64decode(request.image_bytes_b64)
+                    img = Image.open(BytesIO(raw))
+                else:
+                    raise HTTPException(status_code=400, detail="No image provided")
+                result = self.ocr.run(img, language=request.language)
+                if result.get("error"):
+                    raise HTTPException(status_code=500, detail=result.get("error"))
+                return OCRResponse(
+                    text=result.get("text", ""),
+                    confidence=result.get("confidence"),
+                    words=result.get("words") or None,
+                )
+            except HTTPException:
+                raise
+            except Exception as e:
+                raise HTTPException(status_code=500, detail=str(e))
 
 
 # Create service instance
