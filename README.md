@@ -15,6 +15,12 @@ Neuralux AI Layer integrates advanced AI capabilities directly into your Linux s
 - 🚧 Gesture and advanced GUI interactions (Phase 2/3)
 - ✅ **Privacy-first, local-first processing** - Your data stays on your machine
 
+## Demo Video
+
+[![Neuralux AI Layer Demo](https://img.youtube.com/vi/xFLJO7vTAoo/maxresdefault.jpg)](https://youtu.be/xFLJO7vTAoo?si=xhOXGHLA6vuEuQ4D)
+
+Watch the demo video to see Neuralux AI Layer in action!
+
 ## Requirements
 
 ### Minimum Hardware
