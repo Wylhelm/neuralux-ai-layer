@@ -119,7 +119,13 @@ aish overlay --hide     # Hide
 **Important:** The `--hotkey` flag is **required** to enable the global Ctrl+Space hotkey on X11. Without it, use the tray icon or `aish overlay --toggle` to control the overlay.
 
 On Wayland, create a desktop shortcut that runs `aish overlay --toggle` and/or use the Makefile targets below. Tray works if AppIndicator is available.
-Press Esc to hide the overlay.
+
+**Features:**
+- 🎨 **Image Generation**: Click the paint button to generate images with AI (Flux models)
+- 🎤 **Voice Input**: Use the microphone button for voice commands
+- 📸 **OCR**: Extract text from screenshots or windows
+- **Movable Window**: Drag the "≡ Neuralux ≡" header to reposition
+- Press Esc to hide the overlay.
 
 ### Desktop Integration Verification
 
@@ -176,6 +182,17 @@ aish> check memory usage
 aish> /explain tar -xzf archive.tar.gz
 aish> /explain docker ps -a
 ```
+
+### Image Generation (Overlay)
+```
+1. Launch overlay: aish overlay --hotkey --tray
+2. Click the 🎨 button (or type your prompt)
+3. Enter a description: "a serene mountain landscape at sunset"
+4. Wait for generation (progress shown)
+5. Use Save/Copy buttons or continue chatting about the image
+```
+
+**Configure models and settings** via Tray → Settings → Image Generation
 
 ## Configuration
 

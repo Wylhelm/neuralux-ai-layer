@@ -97,10 +97,12 @@ aish overlay --hide          # Hide overlay instance
 **Note:** You MUST use `--hotkey` to enable the Ctrl+Space hotkey. Press Esc to hide.
 
 Shortcuts and tips:
-- Tray → Settings: choose LLM/STT models, save defaults; tray → About Neuralux
-- Slash palette: type `/` to browse commands; `/web <query>` or “search the web for …” for web search
+- Tray → Settings: choose LLM/STT/Image Gen models, sizes, and steps
+- 🎨 **Image Generation**: Click paint button, enter prompt, wait for generation
+- Slash palette: type `/` to browse commands; `/web <query>` or "search the web for …" for web search
 - OCR region select: `/ocr select` (install `slop`)
-- Conversation: “Continue chat” uses last OCR as context; “Start fresh” clears memory
+- Conversation: "Continue chat" uses last OCR/image as context; "Start fresh" clears memory
+- **Movable window**: Drag the "≡ Neuralux ≡" header to reposition
 
 See `OVERLAY.md` for Wayland tips, tray setup, and troubleshooting.
 
@@ -141,11 +143,14 @@ aish speak "Save" --output audio.wav
 
 See `AUDIO.md` for complete voice interface documentation.
 
-Overlay voice & approvals:
-- Mic (🎤): single-turn voice capture (STT → LLM)
-- Speaker (🔇/🔊): toggle auto TTS of results
+Overlay voice, image generation & approvals:
+- 🎤 Mic: single-turn voice capture (STT → LLM)
+- 🔇/🔊 Speaker: toggle auto TTS of results
+- 🎨 Image Gen: generate images with Flux AI models (Flux-schnell, Flux-dev, SDXL-Lightning)
+  - Click button, enter prompt, view progress, Save/Copy result
+  - Configure via Tray → Settings → Image Generation (model, size, steps)
 - Approvals: actions (run command, open file/URL) require Approve/Cancel
-- Web search by voice: say “search the web for <query>”
+- Web search by voice: say "search the web for <query>"
 
 #### Tray and desktop integration (optional)
 ```bash
@@ -200,7 +205,8 @@ aish overlay --toggle
 - `AUDIO.md` - Voice interface guide
 - `OVERLAY.md` - GUI overlay guide
 - `API.md` - API reference
-- `QUICK_REFERENCE.md` - Includes /web and /mode chat
+- `QUICK_REFERENCE.md` - This file (includes /web, /mode chat, image gen)
+- `IMAGE_GENERATION.md` - Image generation guide
 - `TEST_RESULTS.md` - Test report
 - `plan.md` - Original project plan
 

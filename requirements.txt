@@ -81,3 +81,10 @@ black>=23.12.0
 ruff>=0.1.0
 mypy>=1.8.0
 
+# Image Generation (for Vision Service)
+diffusers>=0.24.0
+accelerate>=0.25.0
+safetensors>=0.4.0
+sentencepiece>=0.1.99
+protobuf>=3.20.0
+bitsandbytes>=0.41.0  # For 8-bit quantization (saves VRAM)

@@ -4,6 +4,9 @@ import sys
 from pathlib import Path
 import structlog
 from fastapi import FastAPI, UploadFile, File, HTTPException
+from fastapi.responses import StreamingResponse
+import asyncio
+from collections import deque
 
 # Add common package to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "packages" / "common"))
@@ -13,8 +16,9 @@ from neuralux.logger import setup_logging
 from neuralux.messaging import MessageBusClient
 
 from config import VisionServiceConfig
-from models import OCRRequest, OCRResponse
+from models import OCRRequest, OCRResponse, ImageGenRequest, ImageGenResponse, ModelInfoResponse
 from ocr_backend import OCRProcessor
+from image_gen_backend import ImageGenerationBackend, set_download_progress_callback
 from typing import Optional
 import base64
 from io import BytesIO
@@ -23,6 +27,13 @@ from PIL import Image
 
 logger = structlog.get_logger(__name__)
 
+# Global progress message queue for streaming
+progress_messages = deque(maxlen=100)
+
+def progress_callback(message: str):
+    """Callback for progress updates."""
+    progress_messages.append(message)
+
 
 class VisionService:
     def __init__(self) -> None:
@@ -30,11 +41,15 @@ class VisionService:
         self.neuralux_config = NeuraluxConfig()
         self.message_bus = MessageBusClient(self.neuralux_config)
         self.ocr = OCRProcessor()
+        self.image_gen = ImageGenerationBackend()
+        
+        # Set progress callback
+        set_download_progress_callback(progress_callback)
 
         self.app = FastAPI(
             title="Neuralux Vision Service",
             version="0.1.0",
-            description="OCR and basic vision capabilities (skeleton)",
+            description="OCR, image generation, and vision capabilities",
         )
         self._setup_routes()
 
@@ -78,10 +93,56 @@ class VisionService:
             except Exception as e:
                 return {"error": str(e)}
 
+        async def _image_gen_handler(data: dict) -> dict:
+            try:
+                req = ImageGenRequest(**data)
+                
+                # Generate image
+                image = self.image_gen.generate(
+                    prompt=req.prompt,
+                    negative_prompt=req.negative_prompt,
+                    width=req.width,
+                    height=req.height,
+                    num_inference_steps=req.num_inference_steps,
+                    guidance_scale=req.guidance_scale,
+                    seed=req.seed,
+                )
+                
+                # Convert to base64
+                buffer = BytesIO()
+                image.save(buffer, format="PNG")
+                image_b64 = base64.b64encode(buffer.getvalue()).decode("utf-8")
+                
+                response = ImageGenResponse(
+                    image_bytes_b64=image_b64,
+                    prompt=req.prompt,
+                    model=self.image_gen.current_model or req.model,
+                    seed=req.seed,
+                    width=image.width,
+                    height=image.height,
+                ).model_dump()
+                
+                # Publish result event
+                try:
+                    await self.message_bus.publish(f"{prefix}.imagegen.result", {"request": req.model_dump(), "response": response})
+                except Exception:
+                    pass
+                
+                return response
+            except Exception as e:
+                logger.error("Image generation failed", error=str(e))
+                return {"error": str(e)}
+
+        async def _model_info_handler(_data: dict) -> dict:
+            info = self.image_gen.get_model_info()
+            return ModelInfoResponse(**info).model_dump()
+
         async def _info_handler(_data: dict) -> dict:
             return {"service": self.config.service_name, "version": "0.1.0", "status": "running"}
 
         await self.message_bus.reply_handler(f"{prefix}.ocr.request", _ocr_handler)
+        await self.message_bus.reply_handler(f"{prefix}.imagegen.request", _image_gen_handler)
+        await self.message_bus.reply_handler(f"{prefix}.imagegen.model_info", _model_info_handler)
         await self.message_bus.reply_handler(f"{prefix}.info", _info_handler)
 
         logger.info("Vision service connected to NATS and handlers registered")
@@ -117,6 +178,83 @@ class VisionService:
                 raise
             except Exception as e:
                 raise HTTPException(status_code=500, detail=str(e))
+
+        @self.app.post("/v1/generate-image")
+        async def generate_image(request: ImageGenRequest) -> ImageGenResponse:
+            """Generate an image from a text prompt using Flux or other models."""
+            try:
+                # Generate image
+                image = self.image_gen.generate(
+                    prompt=request.prompt,
+                    negative_prompt=request.negative_prompt,
+                    width=request.width,
+                    height=request.height,
+                    num_inference_steps=request.num_inference_steps,
+                    guidance_scale=request.guidance_scale,
+                    seed=request.seed,
+                )
+                
+                # Convert to base64
+                buffer = BytesIO()
+                image.save(buffer, format="PNG")
+                image_b64 = base64.b64encode(buffer.getvalue()).decode("utf-8")
+                
+                return ImageGenResponse(
+                    image_bytes_b64=image_b64,
+                    prompt=request.prompt,
+                    model=self.image_gen.current_model or request.model,
+                    seed=request.seed,
+                    width=image.width,
+                    height=image.height,
+                )
+            except HTTPException:
+                raise
+            except Exception as e:
+                logger.error("Image generation failed", error=str(e))
+                raise HTTPException(status_code=500, detail=str(e))
+
+        @self.app.get("/v1/model-info")
+        async def get_model_info() -> ModelInfoResponse:
+            """Get information about the current image generation model."""
+            info = self.image_gen.get_model_info()
+            return ModelInfoResponse(**info)
+
+        @self.app.post("/v1/load-model")
+        async def load_model(model_name: str):
+            """Load a specific image generation model."""
+            try:
+                self.image_gen.load_model(model_name)
+                return {"status": "ok", "model": model_name}
+            except Exception as e:
+                raise HTTPException(status_code=500, detail=str(e))
+
+        @self.app.get("/v1/progress-stream")
+        async def progress_stream():
+            """Stream progress messages as Server-Sent Events."""
+            async def event_generator():
+                last_sent_count = 0
+                try:
+                    while True:
+                        # Send new messages
+                        current_count = len(progress_messages)
+                        if current_count > last_sent_count:
+                            for i in range(last_sent_count, current_count):
+                                msg = list(progress_messages)[i]
+                                yield f"data: {msg}\n\n"
+                            last_sent_count = current_count
+                        
+                        await asyncio.sleep(0.5)
+                except asyncio.CancelledError:
+                    pass
+            
+            return StreamingResponse(
+                event_generator(),
+                media_type="text/event-stream",
+                headers={
+                    "Cache-Control": "no-cache",
+                    "Connection": "keep-alive",
+                }
+            )
 
 
 # Create service instance

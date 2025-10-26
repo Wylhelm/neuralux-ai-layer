@@ -148,8 +148,10 @@ Implemented:
 - `system.health.summary` - Current health snapshot and alerts
 - `ai.vision.ocr.request` - OCR request/reply
 - `ai.vision.ocr.result` - OCR result broadcast
- - `ai.llm.reload.events` - Model reload lifecycle events (start/done/error)
- - `ai.audio.reload.events` - STT model switch lifecycle events
+- `ai.vision.imagegen.request` - Image generation request/reply
+- `ai.vision.imagegen.model_info` - Get available models and info
+- `ai.llm.reload.events` - Model reload lifecycle events (start/done/error)
+- `ai.audio.reload.events` - STT model switch lifecycle events
 
 Notes:
 - Health summary includes NVIDIA GPU metrics (utilization %, VRAM, temperature, power) when NVML is available.
@@ -227,6 +229,13 @@ NeuroTuxLayer/
 │   │   ├── tts_backend.py     # Piper TTS
 │   │   ├── vad_backend.py     # Silero VAD
 │   │   └── service.py         # FastAPI service
+│   │
+│   ├── vision/                # Vision service (Phase 2B)
+│   │   ├── config.py          # Service config
+│   │   ├── models.py          # Data models
+│   │   ├── ocr_backend.py     # PaddleOCR backend
+│   │   ├── image_gen_backend.py # Flux/SDXL image generation
+│   │   └── service.py         # FastAPI service
 │
 ├── scripts/
 │   ├── start-services.sh      # Start all services
@@ -250,11 +259,18 @@ NeuroTuxLayer/
   - Text-to-speech with Piper
   - Voice activity detection with Silero VAD
   - CLI commands: `aish listen`, `aish speak`
-- [x] Vision service (OCR MVP)
-  - REST: POST /v1/ocr
-  - NATS: ai.vision.ocr.request / ai.vision.ocr.result
-  - Overlay: OCR active window, Quick Actions (Copy, Summarize, Translate, Extract), Continue chat/Start fresh
-  - Shared session memory via Redis (24h TTL)
+- [x] Vision service (OCR + Image Generation) ✅ **IMPLEMENTED**
+  - OCR with PaddleOCR
+    - REST: POST /v1/ocr
+    - NATS: ai.vision.ocr.request / ai.vision.ocr.result
+    - Overlay: OCR active window, Quick Actions (Copy, Summarize, Translate, Extract), Continue chat/Start fresh
+    - Shared session memory via Redis (24h TTL)
+  - Image Generation with Flux AI
+    - Models: FLUX.1-schnell (4-step fast), FLUX.1-dev (high quality), SDXL-Lightning
+    - 8-bit quantization with bitsandbytes for VRAM efficiency
+    - REST: POST /v1/generate-image, GET /v1/model-info, GET /v1/progress-stream (SSE)
+    - Overlay: 🎨 button for inline generation, preview, Save/Copy/Continue chat
+    - Settings: Model, size (512-1024px), steps configurable via tray → Settings
 - [ ] Temporal intelligence system
  - [x] Overlay enhancements
    - Settings window (LLM/STT), About dialog, tray menu updates
@@ -265,7 +281,7 @@ NeuroTuxLayer/
 ### Phase 3 (Advanced Features)
 - [ ] Gesture recognition
 - [ ] Developer tool integration
-- [ ] Media generation
+- [x] Media generation (Image generation with Flux AI) ✅
 - [ ] Collaboration features
 - [ ] Plugin system
 

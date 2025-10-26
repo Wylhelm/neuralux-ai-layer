@@ -84,6 +84,19 @@ class OverlayWindow(Gtk.ApplicationWindow):
         main_box.set_margin_start(20)
         main_box.set_margin_end(20)
 
+        # Drag handle (title bar area)
+        drag_handle = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=0)
+        drag_handle.set_size_request(-1, 30)
+        drag_handle.set_halign(Gtk.Align.FILL)
+        drag_handle_label = Gtk.Label(label="≡ Neuralux ≡")
+        drag_handle_label.set_halign(Gtk.Align.CENTER)
+        drag_handle_label.get_style_context().add_class("drag-handle")
+        drag_handle.append(drag_handle_label)
+        main_box.append(drag_handle)
+        
+        # Store drag handle for controller
+        self._drag_handle = drag_handle
+
         # Top controls (voice + speaker + session/history/ocr)
         controls_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
         controls_box.set_halign(Gtk.Align.END)
@@ -144,6 +157,15 @@ class OverlayWindow(Gtk.ApplicationWindow):
             pass
         controls_box.append(self.refresh_button)
 
+        # Image generation button
+        self.image_gen_button = Gtk.Button(label="🎨")
+        self.image_gen_button.set_tooltip_text("Generate image with AI (/generate)")
+        try:
+            self.image_gen_button.connect("clicked", self._on_image_gen_clicked)
+        except Exception:
+            pass
+        controls_box.append(self.image_gen_button)
+
         main_box.append(controls_box)
         
         # Search entry
@@ -198,7 +220,106 @@ class OverlayWindow(Gtk.ApplicationWindow):
         
         outer.append(main_box)
         self.set_child(outer)
+        
+        # Image generation mode flag
+        self._image_gen_mode = False
+        
+        # Drag state for moving window
+        self._drag_active = False
+        self._drag_start_x = 0
+        self._drag_start_y = 0
+        
+        # Add drag controller for window movement
+        self._setup_drag_controller()
+        
         GLib.timeout_add_seconds(5, self._refresh_context)
+    
+    def _setup_drag_controller(self):
+        """Setup drag controller to make window movable via drag handle."""
+        try:
+            if not hasattr(self, '_drag_handle'):
+                return
+            
+            # Create gesture for dragging on the handle
+            drag_gesture = Gtk.GestureDrag()
+            drag_gesture.set_button(1)  # Left mouse button
+            
+            window_start_pos = [0, 0]  # Store window position at drag start
+            
+            def on_drag_begin(gesture, start_x, start_y):
+                try:
+                    self._drag_active = True
+                    
+                    # Get current window position (X11)
+                    try:
+                        from gi.repository import GdkX11
+                        surface = self.get_surface()
+                        if surface and isinstance(surface, GdkX11.X11Surface):
+                            xid = GdkX11.X11Surface.get_xid(surface)
+                            from Xlib import display
+                            d = display.Display()
+                            win = d.create_resource_object('window', xid)
+                            geom = win.get_geometry()
+                            window_start_pos[0] = geom.x
+                            window_start_pos[1] = geom.y
+                    except Exception:
+                        pass
+                except Exception:
+                    pass
+            
+            def on_drag_update(gesture, offset_x, offset_y):
+                try:
+                    if self._drag_active:
+                        # Move window (X11)
+                        try:
+                            from gi.repository import GdkX11
+                            surface = self.get_surface()
+                            if surface and isinstance(surface, GdkX11.X11Surface):
+                                xid = GdkX11.X11Surface.get_xid(surface)
+                                from Xlib import display
+                                d = display.Display()
+                                win = d.create_resource_object('window', xid)
+                                new_x = int(window_start_pos[0] + offset_x)
+                                new_y = int(window_start_pos[1] + offset_y)
+                                win.configure(x=new_x, y=new_y)
+                                d.flush()
+                        except Exception:
+                            pass
+                except Exception:
+                    pass
+            
+            def on_drag_end(gesture, offset_x, offset_y):
+                try:
+                    self._drag_active = False
+                except Exception:
+                    pass
+            
+            drag_gesture.connect("drag-begin", on_drag_begin)
+            drag_gesture.connect("drag-update", on_drag_update)
+            drag_gesture.connect("drag-end", on_drag_end)
+            
+            # Add controller to drag handle
+            self._drag_handle.add_controller(drag_gesture)
+            
+            # Change cursor on hover
+            motion_controller = Gtk.EventControllerMotion()
+            def on_enter(_ctrl, _x, _y):
+                try:
+                    self._drag_handle.set_cursor_from_name("grab")
+                except Exception:
+                    pass
+            def on_leave(_ctrl):
+                try:
+                    self._drag_handle.set_cursor_from_name("default")
+                except Exception:
+                    pass
+            motion_controller.connect("enter", on_enter)
+            motion_controller.connect("leave", on_leave)
+            self._drag_handle.add_controller(motion_controller)
+            
+            logger.info("Drag controller setup for window movement")
+        except Exception as e:
+            logger.error("Failed to setup drag controller", error=str(e))
     
     def _setup_styling(self):
         """Setup CSS styling."""
@@ -249,6 +370,13 @@ class OverlayWindow(Gtk.ApplicationWindow):
         
         label {
             color: #cdd6f4;
+        }
+        
+        .drag-handle {
+            color: #89b4fa;
+            font-size: 14px;
+            opacity: 0.7;
+            padding: 4px;
         }
         
         .result-title {
@@ -328,12 +456,31 @@ class OverlayWindow(Gtk.ApplicationWindow):
             self.set_tts_enabled(not getattr(self, "_tts_enabled", False))
         except Exception:
             pass
+
+    def _on_image_gen_clicked(self, _button):
+        """Start image generation in overlay."""
+        try:
+            self.clear_results()
+            self.search_entry.set_text("")
+            self.search_entry.set_placeholder_text("Describe the image you want to generate...")
+            self.search_entry.grab_focus()
+            self.set_status("Image generation mode - Enter your prompt and press Enter")
+            # Set a flag for image gen mode
+            self._image_gen_mode = True
+        except Exception:
+            pass
     
     def _on_entry_activate(self, entry):
         """Handle Enter key in search entry."""
         text = entry.get_text().strip()
         if text:
-            self.on_command(text)
+            # Check if in image generation mode
+            if getattr(self, "_image_gen_mode", False):
+                self._generate_image_inline(text)
+                self._image_gen_mode = False
+                entry.set_placeholder_text("Type a command or question...")
+            else:
+                self.on_command(text)
             entry.set_text("")
     
     def _on_entry_changed(self, entry):
@@ -861,7 +1008,7 @@ class OverlayWindow(Gtk.ApplicationWindow):
 
         w = Gtk.Window(title="Settings")
         w.set_transient_for(self)
-        w.set_default_size(480, 280)
+        w.set_default_size(500, 450)
         vb = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
         vb.set_margin_top(12)
         vb.set_margin_bottom(12)
@@ -911,6 +1058,55 @@ class OverlayWindow(Gtk.ApplicationWindow):
             pass
         stt_row.append(stt_combo)
         vb.append(stt_row)
+        
+        # Separator
+        sep = Gtk.Separator()
+        vb.append(sep)
+        
+        # Image Generation Settings
+        img_gen_label = Gtk.Label()
+        img_gen_label.set_markup("<b>Image Generation</b>")
+        img_gen_label.set_halign(Gtk.Align.START)
+        vb.append(img_gen_label)
+        
+        # Image gen model
+        img_model_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        img_model_row.append(Gtk.Label(label="Model:"))
+        img_model_combo = _Gtk.ComboBoxText()
+        for name in ["flux-schnell (fast)", "flux-dev (quality)", "sdxl-lightning"]:
+            img_model_combo.append_text(name)
+        img_model_default = current.get("image_gen_model", "flux-schnell")
+        try:
+            idx = ["flux-schnell", "flux-dev", "sdxl-lightning"].index(img_model_default)
+            img_model_combo.set_active(idx)
+        except Exception:
+            img_model_combo.set_active(0)
+        img_model_row.append(img_model_combo)
+        vb.append(img_model_row)
+        
+        # Image size
+        img_size_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        img_size_row.append(Gtk.Label(label="Size:"))
+        img_size_combo = _Gtk.ComboBoxText()
+        for size in ["512x512", "768x768", "1024x768", "768x1024", "1024x1024"]:
+            img_size_combo.append_text(size)
+        size_default = f"{current.get('image_gen_width', 1024)}x{current.get('image_gen_height', 1024)}"
+        try:
+            img_size_combo.set_active(["512x512", "768x768", "1024x768", "768x1024", "1024x1024"].index(size_default))
+        except Exception:
+            img_size_combo.set_active(4)  # 1024x1024
+        img_size_row.append(img_size_combo)
+        vb.append(img_size_row)
+        
+        # Steps
+        img_steps_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        img_steps_row.append(Gtk.Label(label="Steps:"))
+        img_steps_spin = Gtk.SpinButton()
+        img_steps_spin.set_range(1, 50)
+        img_steps_spin.set_increments(1, 5)
+        img_steps_spin.set_value(current.get("image_gen_steps", 4))
+        img_steps_row.append(img_steps_spin)
+        vb.append(img_steps_row)
 
         # Status label
         info = Gtk.Label(label="")
@@ -937,9 +1133,23 @@ class OverlayWindow(Gtk.ApplicationWindow):
                 sel = stt_combo.get_active_text()
                 if sel:
                     self.on_command(f"/set stt.model {sel}")
+                
+                # Image generation settings
+                img_model_text = img_model_combo.get_active_text() or "flux-schnell (fast)"
+                img_model = img_model_text.split(" ")[0]  # Extract model name
+                self.on_command(f"/set image_gen.model {img_model}")
+                
+                img_size_text = img_size_combo.get_active_text() or "1024x1024"
+                width, height = map(int, img_size_text.split("x"))
+                self.on_command(f"/set image_gen.width {width}")
+                self.on_command(f"/set image_gen.height {height}")
+                
+                steps = int(img_steps_spin.get_value())
+                self.on_command(f"/set image_gen.steps {steps}")
+                
                 info.set_text("Applied. Models will reload if required.")
-            except Exception:
-                info.set_text("Failed to apply.")
+            except Exception as e:
+                info.set_text(f"Failed to apply: {e}")
             finally:
                 try:
                     self.end_busy("Ready")
@@ -952,11 +1162,13 @@ class OverlayWindow(Gtk.ApplicationWindow):
             except Exception:
                 pass
             try:
+                # First apply, then save
+                _apply(None)
                 self.on_command("/settings.save")
                 info.set_text("Saved defaults.")
                 self.show_toast("Settings saved")
-            except Exception:
-                info.set_text("Failed to save.")
+            except Exception as e:
+                info.set_text(f"Failed to save: {e}")
             finally:
                 try:
                     self.end_busy("Ready")
@@ -1014,6 +1226,535 @@ class OverlayWindow(Gtk.ApplicationWindow):
 
         try:
             dl_btn.connect("clicked", _download_mistral)
+        except Exception:
+            pass
+
+        w.set_child(vb)
+        try:
+            w.present()
+        except Exception:
+            pass
+
+    def _generate_image_inline(self, prompt: str):
+        """Generate image and display in overlay results area."""
+        try:
+            self.clear_results()
+            self.begin_busy("Generating image...")
+            
+            # Get settings from stored config
+            try:
+                from neuralux.memory import SessionStore
+                from neuralux.config import NeuraluxConfig
+                cfg = NeuraluxConfig()
+                store = SessionStore(cfg)
+                settings = store.load_settings(cfg.settings_path())
+                
+                width = settings.get("image_gen_width", 1024)
+                height = settings.get("image_gen_height", 1024)
+                steps = settings.get("image_gen_steps", 4)
+                model = settings.get("image_gen_model", "flux-schnell")
+            except Exception:
+                width, height, steps, model = 1024, 1024, 4, "flux-schnell"
+            
+            # Show generation info
+            self.add_result(
+                "Generating Image",
+                f"Prompt: {prompt}\nSize: {width}x{height}\nSteps: {steps}\nModel: {model}"
+            )
+            
+            # Generate in background
+            import threading
+            def _gen_worker():
+                try:
+                    import httpx
+                    import base64
+                    from gi.repository import GdkPixbuf, GLib
+                    
+                    # Monitor progress
+                    progress_stop = threading.Event()
+                    
+                    def _monitor_progress():
+                        try:
+                            with httpx.stream("GET", "http://localhost:8005/v1/progress-stream", timeout=None) as stream:
+                                for line in stream.iter_lines():
+                                    if progress_stop.is_set():
+                                        break
+                                    if line.startswith("data: "):
+                                        msg = line[6:]
+                                        GLib.idle_add(lambda m=msg: self.set_status(m) or False)
+                        except Exception:
+                            pass
+                    
+                    progress_thread = threading.Thread(target=_monitor_progress, daemon=True)
+                    progress_thread.start()
+                    
+                    try:
+                        response = httpx.post(
+                            "http://localhost:8005/v1/generate-image",
+                            json={
+                                "prompt": prompt,
+                                "width": width,
+                                "height": height,
+                                "num_inference_steps": steps,
+                                "model": model,
+                            },
+                            timeout=600.0,
+                        )
+                        response.raise_for_status()
+                        result = response.json()
+                    finally:
+                        progress_stop.set()
+                    
+                    image_b64 = result.get("image_bytes_b64")
+                    if image_b64:
+                        # Decode image
+                        image_bytes = base64.b64decode(image_b64)
+                        
+                        # Save to temp file for display
+                        import tempfile
+                        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
+                            f.write(image_bytes)
+                            temp_path = f.name
+                        
+                        def _show_result():
+                            try:
+                                self.clear_results()
+                                
+                                # Create outer box for image row
+                                img_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+                                img_box.set_margin_top(8)
+                                img_box.set_margin_bottom(8)
+                                
+                                # Show prompt above image
+                                prompt_label = Gtk.Label()
+                                prompt_label.set_markup(f'<b>"{prompt}"</b>')
+                                prompt_label.set_wrap(True)
+                                prompt_label.set_xalign(0.5)
+                                prompt_label.set_margin_bottom(8)
+                                img_box.append(prompt_label)
+                                
+                                # Load and display image
+                                from gi.repository import GdkPixbuf, Gdk, Gio
+                                
+                                try:
+                                    # Load pixbuf
+                                    pixbuf = GdkPixbuf.Pixbuf.new_from_file(temp_path)
+                                    
+                                    # Scale to fit in overlay (max 400px height, maintain aspect ratio)
+                                    orig_width = pixbuf.get_width()
+                                    orig_height = pixbuf.get_height()
+                                    
+                                    max_height = 400
+                                    if orig_height > max_height:
+                                        scale = max_height / orig_height
+                                        new_width = int(orig_width * scale)
+                                        new_height = max_height
+                                        pixbuf = pixbuf.scale_simple(new_width, new_height, GdkPixbuf.InterpType.BILINEAR)
+                                    
+                                    # Convert to texture
+                                    texture = Gdk.Texture.new_for_pixbuf(pixbuf)
+                                    
+                                    # Create picture widget
+                                    picture = Gtk.Picture()
+                                    picture.set_paintable(texture)
+                                    picture.set_size_request(pixbuf.get_width(), pixbuf.get_height())
+                                    picture.set_halign(Gtk.Align.CENTER)
+                                    picture.set_valign(Gtk.Align.CENTER)
+                                    picture.set_can_shrink(False)
+                                    img_box.append(picture)
+                                    
+                                    logger.info(f"Image loaded: {pixbuf.get_width()}x{pixbuf.get_height()}")
+                                except Exception as img_err:
+                                    logger.error(f"Image display error: {img_err}")
+                                    err_label = Gtk.Label(label=f"Image loaded but display failed: {img_err}\nTemp file: {temp_path}")
+                                    err_label.set_wrap(True)
+                                    img_box.append(err_label)
+                                
+                                # Store texture for clipboard (need to keep reference)
+                                stored_texture = texture if 'texture' in locals() else None
+                                
+                                # Buttons row
+                                btn_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+                                btn_box.set_halign(Gtk.Align.CENTER)
+                                btn_box.set_margin_top(8)
+                                
+                                # Save button (compact)
+                                save_btn = Gtk.Button(label="💾 Save")
+                                def _save(_b):
+                                    self._save_generated_image(image_bytes, prompt)
+                                save_btn.connect("clicked", _save)
+                                btn_box.append(save_btn)
+                                
+                                # Copy to clipboard button
+                                copy_btn = Gtk.Button(label="📋 Copy")
+                                def _copy(_b):
+                                    try:
+                                        # Copy image to clipboard
+                                        clipboard = Gdk.Display.get_default().get_clipboard()
+                                        if stored_texture:
+                                            clipboard.set_texture(stored_texture)
+                                            self.show_toast("Image copied to clipboard!")
+                                        else:
+                                            self.show_toast("No texture available to copy")
+                                    except Exception as e:
+                                        self.show_toast(f"Copy failed: {e}")
+                                copy_btn.connect("clicked", _copy)
+                                btn_box.append(copy_btn)
+                                
+                                # Continue conversation button
+                                continue_btn = Gtk.Button(label="💬 Continue Chat")
+                                def _continue(_b):
+                                    # Exit image gen mode and prepare for conversation
+                                    self._image_gen_mode = False
+                                    self.search_entry.set_placeholder_text("Ask about the image or enter new prompt...")
+                                    self.search_entry.grab_focus()
+                                    self.set_status("Chat about your image")
+                                continue_btn.connect("clicked", _continue)
+                                btn_box.append(continue_btn)
+                                
+                                img_box.append(btn_box)
+                                
+                                # Add to results as a row
+                                row = Gtk.ListBoxRow()
+                                row.set_child(img_box)
+                                row.set_activatable(False)  # Don't activate on click
+                                row.set_selectable(False)   # Don't select
+                                self.results_list.append(row)
+                                
+                                # Make sure the row is visible
+                                row.set_visible(True)
+                                img_box.set_visible(True)
+                                
+                                logger.info("Image row added to results list")
+                                
+                                self.end_busy("✓ Image generated!")
+                                self.show_toast("Image ready!")
+                            except Exception as e:
+                                self.end_busy(f"Display error: {e}")
+                            return False
+                        
+                        GLib.idle_add(_show_result)
+                    else:
+                        GLib.idle_add(lambda: self.end_busy("No image returned") or False)
+                        
+                except Exception as e:
+                    GLib.idle_add(lambda err=str(e): self.end_busy(f"Generation failed: {err}") or False)
+            
+            threading.Thread(target=_gen_worker, daemon=True).start()
+            
+        except Exception as e:
+            self.end_busy(f"Error: {e}")
+    
+    def _save_generated_image(self, image_bytes: bytes, prompt: str):
+        """Save generated image with file dialog."""
+        try:
+            from gi.repository import Gtk as _Gtk
+            import re
+            from datetime import datetime
+            
+            dialog = _Gtk.FileDialog()
+            dialog.set_title("Save Generated Image")
+            
+            # Generate filename
+            safe_prompt = re.sub(r'[^\w\s-]', '', prompt)[:50]
+            safe_prompt = re.sub(r'[-\s]+', '_', safe_prompt)
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            default_name = f"{safe_prompt}_{timestamp}.png"
+            dialog.set_initial_name(default_name)
+            
+            def _on_save_finish(dialog, result):
+                try:
+                    file = dialog.save_finish(result)
+                    if file:
+                        path = file.get_path()
+                        with open(path, "wb") as f:
+                            f.write(image_bytes)
+                        self.show_toast(f"Image saved!")
+                        self.set_status(f"Saved to {path}")
+                except Exception as e:
+                    if "dismiss" not in str(e).lower():
+                        self.show_toast(f"Save failed: {e}")
+            
+            dialog.save(self, None, _on_save_finish)
+        except Exception as e:
+            self.show_toast(f"Save error: {e}")
+    
+    def _show_old_image_gen_dialog(self):
+        """Show image generation dialog with prompt input and generate button."""
+        w = Gtk.Window(title="Generate Image with AI")
+        w.set_transient_for(self)
+        w.set_default_size(600, 450)
+        
+        vb = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
+        vb.set_margin_top(12)
+        vb.set_margin_bottom(12)
+        vb.set_margin_start(12)
+        vb.set_margin_end(12)
+
+        # Title
+        title = Gtk.Label()
+        title.set_markup("<b>Generate Image with Flux AI</b>")
+        title.set_halign(Gtk.Align.START)
+        vb.append(title)
+
+        # Prompt input (multiline)
+        prompt_label = Gtk.Label(label="Prompt (describe the image):")
+        prompt_label.set_halign(Gtk.Align.START)
+        vb.append(prompt_label)
+        
+        scrolled_prompt = Gtk.ScrolledWindow()
+        scrolled_prompt.set_size_request(-1, 100)
+        prompt_text = Gtk.TextView()
+        prompt_text.set_wrap_mode(Gtk.WrapMode.WORD)
+        scrolled_prompt.set_child(prompt_text)
+        vb.append(scrolled_prompt)
+
+        # Settings row 1: Size
+        size_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        size_row.append(Gtk.Label(label="Size:"))
+        size_combo = Gtk.ComboBoxText()
+        for size_option in ["1024x1024", "1024x768", "768x1024", "512x512"]:
+            size_combo.append_text(size_option)
+        size_combo.set_active(0)
+        size_row.append(size_combo)
+        
+        # Model selection
+        size_row.append(Gtk.Label(label="Model:"))
+        model_combo = Gtk.ComboBoxText()
+        for model_option in ["flux-schnell (fast)", "flux-dev (quality)", "sdxl-lightning"]:
+            model_combo.append_text(model_option)
+        model_combo.set_active(0)
+        size_row.append(model_combo)
+        vb.append(size_row)
+
+        # Settings row 2: Steps
+        steps_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        steps_row.append(Gtk.Label(label="Steps:"))
+        steps_spin = Gtk.SpinButton()
+        steps_spin.set_range(1, 50)
+        steps_spin.set_increments(1, 5)
+        steps_spin.set_value(4)
+        steps_row.append(steps_spin)
+        vb.append(steps_row)
+
+        # Status label
+        status_label = Gtk.Label(label="")
+        vb.append(status_label)
+
+        # Image preview placeholder
+        image_preview = Gtk.Picture()
+        image_preview.set_size_request(400, 400)
+        image_preview.set_can_shrink(True)
+        vb.append(image_preview)
+
+        # Buttons
+        btn_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        gen_button = Gtk.Button(label="Generate")
+        save_button = Gtk.Button(label="Save Image")
+        save_button.set_sensitive(False)  # Disabled until image is generated
+        close_button = Gtk.Button(label="Close")
+        btn_box.append(gen_button)
+        btn_box.append(save_button)
+        btn_box.append(close_button)
+        vb.append(btn_box)
+
+        # Store generated image data
+        generated_image_data = {"image_b64": None, "prompt": None}
+
+        def _on_generate(_b):
+            """Generate image using vision service."""
+            try:
+                status_label.set_text("Generating image...")
+                gen_button.set_sensitive(False)
+                
+                # Get prompt
+                buffer = prompt_text.get_buffer()
+                prompt = buffer.get_text(
+                    buffer.get_start_iter(),
+                    buffer.get_end_iter(),
+                    False
+                )
+                
+                if not prompt.strip():
+                    status_label.set_text("Error: Please enter a prompt")
+                    gen_button.set_sensitive(True)
+                    return
+                
+                # Get size
+                size_text = size_combo.get_active_text() or "1024x1024"
+                width, height = map(int, size_text.split("x"))
+                
+                # Get model
+                model_text = model_combo.get_active_text() or "flux-schnell (fast)"
+                model = model_text.split(" ")[0]  # Extract just the model name
+                
+                # Get steps
+                steps = int(steps_spin.get_value())
+                
+                # Send generate command via on_command with special marker
+                # We'll need to add handling for this in the main command handler
+                cmd = f"/imagegen prompt=\"{prompt}\" width={width} height={height} model={model} steps={steps}"
+                
+                # Store prompt for save
+                generated_image_data["prompt"] = prompt
+                
+                # Trigger generation (async via on_command)
+                import threading
+                def _generate_async():
+                    try:
+                        # Call the generation via NATS/REST
+                        import httpx
+                        import base64
+                        from io import BytesIO
+                        from gi.repository import GdkPixbuf, GLib
+                        
+                        # Start progress monitoring in a separate thread
+                        progress_stop = threading.Event()
+                        
+                        def _monitor_progress():
+                            """Monitor progress stream."""
+                            try:
+                                with httpx.stream("GET", "http://localhost:8005/v1/progress-stream", timeout=None) as stream:
+                                    for line in stream.iter_lines():
+                                        if progress_stop.is_set():
+                                            break
+                                        if line.startswith("data: "):
+                                            msg = line[6:]  # Remove "data: " prefix
+                                            def _update_status(message=msg):
+                                                status_label.set_text(message)
+                                                return False
+                                            GLib.idle_add(_update_status)
+                            except Exception:
+                                pass
+                        
+                        progress_thread = threading.Thread(target=_monitor_progress, daemon=True)
+                        progress_thread.start()
+                        
+                        try:
+                            response = httpx.post(
+                                "http://localhost:8005/v1/generate-image",
+                                json={
+                                    "prompt": prompt,
+                                    "width": width,
+                                    "height": height,
+                                    "num_inference_steps": steps,
+                                    "model": model,
+                                },
+                                timeout=600.0,  # 10 minutes timeout for first-time download
+                            )
+                            response.raise_for_status()
+                            result = response.json()
+                        finally:
+                            # Stop progress monitoring
+                            progress_stop.set()
+                        
+                        # Get image data
+                        image_b64 = result.get("image_bytes_b64")
+                        if image_b64:
+                            # Store for save
+                            generated_image_data["image_b64"] = image_b64
+                            
+                            # Decode and display
+                            image_bytes = base64.b64decode(image_b64)
+                            
+                            # Load into pixbuf
+                            loader = GdkPixbuf.PixbufLoader()
+                            loader.write(image_bytes)
+                            loader.close()
+                            pixbuf = loader.get_pixbuf()
+                            
+                            # Update UI in main thread
+                            def _update_ui():
+                                try:
+                                    from gi.repository import Gdk
+                                    texture = Gdk.Texture.new_for_pixbuf(pixbuf)
+                                    image_preview.set_paintable(texture)
+                                    status_label.set_text("✓ Image generated successfully!")
+                                    save_button.set_sensitive(True)
+                                    gen_button.set_sensitive(True)
+                                except Exception as e:
+                                    status_label.set_text(f"Display error: {e}")
+                                    gen_button.set_sensitive(True)
+                                return False
+                            GLib.idle_add(_update_ui)
+                        else:
+                            def _error():
+                                status_label.set_text("Error: No image returned")
+                                gen_button.set_sensitive(True)
+                                return False
+                            GLib.idle_add(_error)
+                    except httpx.TimeoutException:
+                        def _error():
+                            status_label.set_text("Timeout: Generation took too long")
+                            gen_button.set_sensitive(True)
+                            return False
+                        GLib.idle_add(_error)
+                    except Exception as e:
+                        def _error():
+                            status_label.set_text(f"Generation failed: {str(e)}")
+                            gen_button.set_sensitive(True)
+                            return False
+                        GLib.idle_add(_error)
+                
+                threading.Thread(target=_generate_async, daemon=True).start()
+                
+            except Exception as e:
+                status_label.set_text(f"Error: {str(e)}")
+                gen_button.set_sensitive(True)
+
+        def _on_save(_b):
+            """Save the generated image to disk."""
+            try:
+                if not generated_image_data.get("image_b64"):
+                    status_label.set_text("No image to save")
+                    return
+                
+                # Create save dialog
+                from gi.repository import Gtk as _Gtk
+                dialog = _Gtk.FileDialog()
+                dialog.set_title("Save Generated Image")
+                
+                # Set default filename based on prompt
+                import re
+                from datetime import datetime
+                prompt = generated_image_data.get("prompt", "image")
+                safe_prompt = re.sub(r'[^\w\s-]', '', prompt)[:50]
+                safe_prompt = re.sub(r'[-\s]+', '_', safe_prompt)
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                default_name = f"{safe_prompt}_{timestamp}.png"
+                dialog.set_initial_name(default_name)
+                
+                def _on_save_finish(dialog, result):
+                    try:
+                        file = dialog.save_finish(result)
+                        if file:
+                            path = file.get_path()
+                            # Decode and save
+                            import base64
+                            image_bytes = base64.b64decode(generated_image_data["image_b64"])
+                            with open(path, "wb") as f:
+                                f.write(image_bytes)
+                            status_label.set_text(f"Saved to {path}")
+                            self.show_toast(f"Image saved!")
+                    except Exception as e:
+                        if "dismiss" not in str(e).lower():
+                            status_label.set_text(f"Save failed: {str(e)}")
+                
+                dialog.save(w, None, _on_save_finish)
+                
+            except Exception as e:
+                status_label.set_text(f"Save error: {str(e)}")
+
+        def _on_close(_b):
+            try:
+                w.close()
+            except Exception:
+                pass
+
+        try:
+            gen_button.connect("clicked", _on_generate)
+            save_button.connect("clicked", _on_save)
+            close_button.connect("clicked", _on_close)
         except Exception:
             pass
 

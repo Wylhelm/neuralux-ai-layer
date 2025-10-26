@@ -9,7 +9,9 @@ Neuralux AI Layer integrates advanced AI capabilities directly into your Linux s
 - ✅ **Semantic file search** - Find files by content, not just names
 - ✅ **Intelligent command generation** - AI suggests safe, correct commands
 - ✅ **System health monitoring** - Real-time metrics with anomaly detection
-- ✅ **Voice interface** - Speech-to-text and text-to-speech (Phase 2B)
+- ✅ **Voice interface** - Speech-to-text and text-to-speech
+- ✅ **Image generation** - AI-powered image creation with Flux models
+- ✅ **OCR and vision** - Extract text from images and screens
 - 🚧 Gesture and advanced GUI interactions (Phase 2/3)
 - ✅ **Privacy-first, local-first processing** - Your data stays on your machine
 
@@ -124,8 +126,14 @@ aish overlay --hide     # Hide
 
 **Important:** The `--hotkey` flag is **required** to enable the global Ctrl+Space hotkey on X11. Without it, use the tray icon or control commands.
 
+**Features:**
+- 🎨 **Image Generation**: Click the paint button to generate images with AI (Flux models)
+- 🎤 **Voice Input**: Use the microphone button for voice commands
+- 📸 **OCR**: Extract text from screenshots or windows
+- **Movable Window**: Drag the "≡ Neuralux ≡" header to reposition
+- Press Esc to hide the overlay
+
 On Wayland, bind a desktop shortcut to run `aish overlay --toggle`. Tray works if AppIndicator is available.
-Press Esc to hide the overlay.
 
 Troubleshooting (X11): If the overlay appears behind other windows, ensure you're on Xorg and try:
 ```bash
@@ -182,8 +190,39 @@ aish ocr --window
 ```
 
 Contextual chat & session memory
-- After OCR, click “Continue chat” to ask follow-ups with the OCR text as context.
-- “Start fresh” clears the session. Sessions are shared across overlay and CLI via Redis (24h TTL).
+- After OCR, click "Continue chat" to ask follow-ups with the OCR text as context.
+- "Start fresh" clears the session. Sessions are shared across overlay and CLI via Redis (24h TTL).
+
+### Image Generation
+
+Generate images directly from the overlay using state-of-the-art Flux AI models:
+
+```bash
+# Launch overlay
+aish overlay --hotkey --tray
+
+# Click the 🎨 button or type a prompt
+# Example: "a serene mountain landscape at sunset"
+# Wait for generation with real-time progress
+# Use Save/Copy buttons or continue chatting about the image
+```
+
+**Available Models:**
+- **FLUX.1-schnell**: Ultra-fast 4-step generation (~5-10 seconds)
+- **FLUX.1-dev**: High-quality detailed images
+- **SDXL-Lightning**: Alternative fast model
+
+**Features:**
+- 8-bit quantization for efficient VRAM usage (~4GB)
+- Real-time progress updates via SSE
+- Configurable image size (512-1024px)
+- Adjustable inference steps
+- Save to PNG or copy to clipboard
+- Continue conversation about generated images
+
+**Configure settings** via Tray → Settings → Image Generation (model, size, steps)
+
+See `IMAGE_GENERATION.md` for complete documentation.
 
 ### Monitor System Health
 
@@ -249,7 +288,7 @@ neuralux-ai-layer/
 │   ├── filesystem/    # Semantic file search
 │   ├── health/        # System health monitoring
 │   ├── audio/         # Audio processing (STT/TTS) ✅
-│   ├── vision/        # Computer vision (Phase 2)
+│   ├── vision/        # Computer vision (OCR + Image Gen) ✅
 │   └── system/        # System intelligence (Phase 2)
 ├── packages/          # Installable packages
 │   ├── cli/          # Command line interface (aish)
@@ -293,26 +332,43 @@ neuralux-ai-layer/
 - [x] LLM integration in GUI
 - [x] Screen context awareness (minimal)
 
-### Phase 2B - Advanced Intelligence 🚧 In Progress (2/4 tasks)
-- [x] Voice interface (STT/TTS) ✅ **NEW!**
+### Phase 2B - Advanced Intelligence 🚧 In Progress (3/4 tasks)
+- [x] Voice interface (STT/TTS) ✅
   - Speech-to-text with faster-whisper
   - Text-to-speech with Piper
   - Voice activity detection with Silero
   - CLI commands: `aish listen`, `aish speak`
-- [ ] Vision service (OCR, screen understanding)
+- [x] Vision service (OCR + Image Generation) ✅ **NEW!**
+  - OCR with PaddleOCR (CLI and overlay)
+  - Image generation with Flux AI models (FLUX.1-schnell, FLUX.1-dev, SDXL-Lightning)
+  - 8-bit quantization for VRAM efficiency
+  - Real-time progress streaming via SSE
+  - Overlay integration with 🎨 button
+  - Quick actions: Save, Copy to clipboard, Continue chat
 - [ ] Temporal intelligence (system history)
 - [ ] Enhanced automation
 
 ### Additional Docs
 
 - See `AUDIO.md` for voice interface guide and API documentation
+- See `IMAGE_GENERATION.md` for image generation guide and troubleshooting
 - See `OVERLAY.md` for overlay usage, Wayland guidance, tray, and troubleshooting
 - See `API.md` for API endpoints and NATS subjects
 
 ### What's New (October 2025)
 
+- **Image Generation** 🎨 **NEW!**
+  - Generate images with Flux AI models directly in the overlay
+  - Models: FLUX.1-schnell (4-step fast), FLUX.1-dev (quality), SDXL-Lightning
+  - 8-bit quantization for efficient VRAM usage (~4GB vs ~20GB)
+  - Real-time progress updates with SSE streaming
+  - Save to PNG or copy to clipboard
+  - Configure via Tray → Settings → Image Generation
+  - Continue conversations about generated images
+  
 - Overlay assistant
-  - Native Settings window (switch LLM/STT models, save defaults)
+  - **Movable window**: Drag the "≡ Neuralux ≡" header to reposition
+  - Native Settings window (LLM/STT/Image Gen models, save defaults)
   - Native About dialog with Neuralux logo
   - Toast notifications and busy spinner for long operations
   - OCR region selection with mouse (via `slop`), hides overlay automatically
@@ -321,7 +377,9 @@ neuralux-ai-layer/
   - New conversation button; refresh suggestions; expanded prompt suggestions
   - Slash command palette with fuzzy search when typing `/`
   - Web search in overlay fixed and improved
+  
 - Services
+  - Vision service with image generation backend
   - LLM REST endpoint to hot-swap models (`POST /v1/model/load?model_name=`)
   - Audio STT endpoint to switch Whisper model (`POST /stt/model?name=`)
   - NATS reload events published during model swaps
