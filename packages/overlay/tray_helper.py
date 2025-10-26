@@ -86,12 +86,23 @@ def main() -> int:
     toggle_item.connect("activate", lambda _i: _publish_sync("ui.overlay.toggle"))
     menu.append(toggle_item)
 
+    # Settings
+    settings_item = Gtk.MenuItem.new_with_label("Settings")
+    settings_item.connect("activate", lambda _i: _publish_sync("ui.overlay.settings"))
+    menu.append(settings_item)
+
+    # Quit above About
     quit_item = Gtk.MenuItem.new_with_label("Quit Overlay")
     def _quit(_i):
         _publish_sync("ui.overlay.quit")
         Gtk.main_quit()
     quit_item.connect("activate", _quit)
     menu.append(quit_item)
+
+    # About at bottom
+    about_item = Gtk.MenuItem.new_with_label("About Neuralux")
+    about_item.connect("activate", lambda _i: _publish_sync("ui.overlay.about"))
+    menu.append(about_item)
 
     menu.show_all()
     indicator.set_menu(menu)

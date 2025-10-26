@@ -148,6 +148,8 @@ Implemented:
 - `system.health.summary` - Current health snapshot and alerts
 - `ai.vision.ocr.request` - OCR request/reply
 - `ai.vision.ocr.result` - OCR result broadcast
+ - `ai.llm.reload.events` - Model reload lifecycle events (start/done/error)
+ - `ai.audio.reload.events` - STT model switch lifecycle events
 
 Notes:
 - Health summary includes NVIDIA GPU metrics (utilization %, VRAM, temperature, power) when NVML is available.
@@ -254,6 +256,11 @@ NeuroTuxLayer/
   - Overlay: OCR active window, Quick Actions (Copy, Summarize, Translate, Extract), Continue chat/Start fresh
   - Shared session memory via Redis (24h TTL)
 - [ ] Temporal intelligence system
+ - [x] Overlay enhancements
+   - Settings window (LLM/STT), About dialog, tray menu updates
+   - OCR region select (mouse), toast notifications, busy spinner
+   - Conversation history + restore; slash command palette
+   - Web search integration and fixes
 
 ### Phase 3 (Advanced Features)
 - [ ] Gesture recognition

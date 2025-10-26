@@ -5,9 +5,15 @@
 - GTK4 command palette with fuzzy search
 - LLM integration via NATS
 - File search (/search) and health (/health) shortcuts
-- Web search (/web) with result summaries
+- Web search (/web) with result summaries and natural phrasing (“search the web for …”)
 - X11 hotkey support; Wayland-friendly control via signals
-- Tray icon (Ayatana/AppIndicator) with toggle and quit
+- Tray icon (Ayatana/AppIndicator) with toggle, settings, quit, and About Neuralux
+- Native Settings window (LLM/STT model selection, save defaults, TTS toggle)
+- Native About dialog with Neuralux logo
+- Toast notifications and busy spinner for long operations
+- Mouse region OCR (`/ocr select`, requires `slop`), overlay hides during capture
+- Conversation history with paging and session restore, New conversation button
+- Slash command palette: type `/` to see all commands with fuzzy search
 
 ## Install prerequisites (Ubuntu/Debian)
 
@@ -69,6 +75,8 @@ ps aux | grep "aish overlay"
 - **Hotkey not capturing**: Ensure you're on X11 (not Wayland). Check `echo $XDG_SESSION_TYPE`.
 - **Tray missing**: Install Ayatana AppIndicator packages; the app will try an external helper automatically.
 - **Overlay behind windows on X11**: `sudo apt install -y wmctrl && wmctrl -x -r com.neuralux.overlay -b add,above,sticky`.
+- **About logo missing**: Install SVG support: `sudo apt install librsvg2-2 gir1.2-rsvg-2.0 gir1.2-gdkpixbuf-2.0`.
+- **Region OCR**: Install selector: `sudo apt install slop`.
 
 ## Environment variables
 

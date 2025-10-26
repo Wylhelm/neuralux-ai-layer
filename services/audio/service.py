@@ -208,6 +208,30 @@ class AudioService:
                 }
             )
         
+        @self.app.post("/stt/model")
+        async def set_stt_model(name: str):
+            """Switch STT model by name (e.g., tiny, base, small, medium, large)."""
+            try:
+                try:
+                    await self.message_bus.publish("ai.audio.reload.events", {"event": "start", "kind": "stt", "model": name})
+                except Exception:
+                    pass
+                self.config.stt_model = name
+                # Reload backend
+                self.stt_backend.unload_model()
+                self.stt_backend.load_model()
+                try:
+                    await self.message_bus.publish("ai.audio.reload.events", {"event": "done", "kind": "stt", "model": name})
+                except Exception:
+                    pass
+                return {"status": "ok", "stt_model": name}
+            except Exception as e:
+                try:
+                    await self.message_bus.publish("ai.audio.reload.events", {"event": "error", "kind": "stt", "model": name, "error": str(e)})
+                except Exception:
+                    pass
+                raise HTTPException(status_code=500, detail=str(e))
+        
         @self.app.post("/stt", response_model=STTResponse)
         async def speech_to_text(request: STTRequest) -> STTResponse:
             """Convert speech to text."""

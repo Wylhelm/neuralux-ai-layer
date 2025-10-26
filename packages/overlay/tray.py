@@ -12,11 +12,13 @@ from typing import Callable, Optional
 class OverlayTray:
     """Create a tray icon with a small menu to control the overlay."""
 
-    def __init__(self, on_toggle: Callable[[], None], on_quit: Callable[[], None], icon_name: str = "utilities-terminal", app_name: str = "Neuralux"):
+    def __init__(self, on_toggle: Callable[[], None], on_quit: Callable[[], None], icon_name: str = "utilities-terminal", app_name: str = "Neuralux", on_about: Optional[Callable[[], None]] = None, on_settings: Optional[Callable[[], None]] = None):
         self.on_toggle = on_toggle
         self.on_quit = on_quit
         self.icon_name = icon_name
         self.app_name = app_name
+        self.on_about = on_about or (lambda: None)
+        self.on_settings = on_settings or (lambda: None)
 
         # Try to import GI components; if not available, no-op
         try:
@@ -71,13 +73,22 @@ class OverlayTray:
             toggle_item.connect("activate", self._on_toggle_activate)
             menu.append(toggle_item)
 
-            # Separator
+            # Settings
+            settings_item = Gtk.MenuItem.new_with_label("Settings")
+            settings_item.connect("activate", self._on_settings_activate)
+            menu.append(settings_item)
+
             menu.append(Gtk.SeparatorMenuItem.new())
 
             # Quit item
             quit_item = Gtk.MenuItem.new_with_label("Quit")
             quit_item.connect("activate", self._on_quit_activate)
             menu.append(quit_item)
+
+            # About at the bottom
+            about_item = Gtk.MenuItem.new_with_label("About Neuralux")
+            about_item.connect("activate", self._on_about_activate)
+            menu.append(about_item)
 
             menu.show()
             self._indicator.set_menu(menu)
@@ -99,5 +110,18 @@ class OverlayTray:
             self._GLib.idle_add(lambda: (self.on_quit(), False))
         except Exception:
             pass
+
+    def _on_about_activate(self, _item) -> None:
+        try:
+            self._GLib.idle_add(lambda: (self.on_about(), False))
+        except Exception:
+            pass
+
+    def _on_settings_activate(self, _item) -> None:
+        try:
+            self._GLib.idle_add(lambda: (self.on_settings(), False))
+        except Exception:
+            pass
+
 
 

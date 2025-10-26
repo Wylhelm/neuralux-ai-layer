@@ -96,6 +96,12 @@ aish overlay --hide          # Hide overlay instance
 
 **Note:** You MUST use `--hotkey` to enable the Ctrl+Space hotkey. Press Esc to hide.
 
+Shortcuts and tips:
+- Tray → Settings: choose LLM/STT models, save defaults; tray → About Neuralux
+- Slash palette: type `/` to browse commands; `/web <query>` or “search the web for …” for web search
+- OCR region select: `/ocr select` (install `slop`)
+- Conversation: “Continue chat” uses last OCR as context; “Start fresh” clears memory
+
 See `OVERLAY.md` for Wayland tips, tray setup, and troubleshooting.
 
 #### Overlay OCR and Actions

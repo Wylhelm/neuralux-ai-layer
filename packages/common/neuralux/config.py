@@ -42,6 +42,10 @@ class NeuraluxConfig(BaseSettings):
     # Logging
     log_level: str = "INFO"
     log_format: str = "json"
+
+    # UI/Settings (user-adjustable)
+    ui_llm_model: str = "llama-3.2-3b-instruct-q4_k_m.gguf"
+    ui_stt_model: str = "medium"
     
     @property
     def data_dir(self) -> Path:
@@ -63,6 +67,9 @@ class NeuraluxConfig(BaseSettings):
         config_dir = Path.home() / ".config" / "neuralux"
         config_dir.mkdir(parents=True, exist_ok=True)
         return config_dir
+
+    def settings_path(self) -> Path:
+        return self.config_dir / "settings.json"
 
 
 def get_config() -> NeuraluxConfig:

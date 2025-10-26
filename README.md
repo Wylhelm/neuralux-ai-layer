@@ -309,6 +309,25 @@ neuralux-ai-layer/
 - See `OVERLAY.md` for overlay usage, Wayland guidance, tray, and troubleshooting
 - See `API.md` for API endpoints and NATS subjects
 
+### What's New (October 2025)
+
+- Overlay assistant
+  - Native Settings window (switch LLM/STT models, save defaults)
+  - Native About dialog with Neuralux logo
+  - Toast notifications and busy spinner for long operations
+  - OCR region selection with mouse (via `slop`), hides overlay automatically
+  - Better active window detection (xdotool/xprop fallback)
+  - Conversation history with paging and session restore
+  - New conversation button; refresh suggestions; expanded prompt suggestions
+  - Slash command palette with fuzzy search when typing `/`
+  - Web search in overlay fixed and improved
+- Services
+  - LLM REST endpoint to hot-swap models (`POST /v1/model/load?model_name=`)
+  - Audio STT endpoint to switch Whisper model (`POST /stt/model?name=`)
+  - NATS reload events published during model swaps
+
+Tip: Restart overlay after updates: `aish overlay --hotkey --tray`.
+
 ## License
 
 Apache 2.0 - See LICENSE file for details

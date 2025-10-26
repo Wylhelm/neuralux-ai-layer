@@ -21,6 +21,18 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent / "common"))
 from neuralux.config import NeuraluxConfig
 from neuralux.messaging import MessageBusClient
 from neuralux.memory import SessionStore, default_session_id
+try:
+    from services.llm.config import LLMServiceConfig  # type: ignore
+    from services.audio.config import AudioServiceConfig  # type: ignore
+except Exception:  # type: ignore
+    # Allow running outside repo layout during some tooling
+    class _Tmp:
+        def __init__(self, port):
+            self.service_port = port
+    def LLMServiceConfig():
+        return _Tmp(8000)
+    def AudioServiceConfig():
+        return _Tmp(8006)
 
 console = Console()
 
@@ -268,6 +280,162 @@ Current context:
             return "Error: Request timed out. The LLM service might be loading the model."
         except Exception as e:
             return f"Error: {str(e)}"
+
+    def _should_chat(self, text: str) -> bool:
+        """Heuristic to decide if input should be handled as natural chat."""
+        t = (text or "").strip().lower()
+        if not t:
+            return False
+        if t.endswith("?"):
+            return True
+        q_starts = ("what ", "why ", "how ", "who ", "when ", "where ", "explain ", "tell me ")
+        return any(t.startswith(s) for s in q_starts)
+
+    async def web_search(self, query: str, num_results: int = 5, language: str = "en", region: str = "us-en") -> list:
+        """Perform a web search and return list of results with title, url, snippet.
+        Attempts to bias results to the given language/region and filters out non-English content by heuristic.
+        """
+        def _mostly_ascii(text: str) -> bool:
+            if not text:
+                return True
+            total = max(len(text), 1)
+            ascii_count = sum(1 for ch in text if ord(ch) < 128)
+            return (ascii_count / total) >= 0.8
+        # Primary: duckduckgo_search library
+        try:
+            # Prefer the new package name if installed; fallback to legacy
+            try:
+                from ddgs import DDGS  # type: ignore
+            except Exception:
+                from duckduckgo_search import DDGS  # type: ignore
+            results = []
+            try:
+                with DDGS() as ddgs:
+                    for r in ddgs.text(query, region=region or "us-en", safesearch="moderate", max_results=num_results):
+                        results.append({
+                            "title": r.get("title", ""),
+                            "url": r.get("href", r.get("url", "")),
+                            "snippet": r.get("body", r.get("abstract", "")),
+                        })
+            except Exception:
+                results = []
+            if results:
+                # Filter out non-English-ish results when language is 'en'
+                if (language or "en").lower().startswith("en"):
+                    results = [x for x in results if _mostly_ascii((x.get("title") or "") + (x.get("snippet") or ""))]
+                return results[:num_results]
+        except Exception:
+            pass
+        # Fallback: scrape DuckDuckGo HTML
+        try:
+            import httpx
+            from bs4 import BeautifulSoup  # type: ignore
+            url = "https://html.duckduckgo.com/html/"
+            params = {"q": query}
+            if region:
+                params["kl"] = region
+            headers = {"User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122 Safari/537.36"}
+            with httpx.Client(headers=headers, timeout=10.0, follow_redirects=True) as client:
+                resp = client.get(url, params=params)
+                if resp.status_code != 200:
+                    return []
+                soup = BeautifulSoup(resp.text, "html.parser")
+                items = []
+                for a in soup.select("a.result__a"):
+                    href = a.get("href") or ""
+                    title = a.get_text(strip=True)
+                    snippet_tag = a.find_parent("div", class_="result__body")
+                    snippet = ""
+                    if snippet_tag:
+                        s = snippet_tag.find("a", class_="result__snippet") or snippet_tag.find("div", class_="result__snippet")
+                        if s:
+                            snippet = s.get_text(" ", strip=True)
+                    if (language or "en").lower().startswith("en") and not _mostly_ascii(title + " " + snippet):
+                        continue
+                    items.append({"title": title, "url": href, "snippet": snippet})
+                    if len(items) >= num_results:
+                        break
+                if items:
+                    return items
+        except Exception:
+            pass
+        # Second fallback: DuckDuckGo lite HTML
+        try:
+            import httpx
+            from bs4 import BeautifulSoup  # type: ignore
+            url = "https://lite.duckduckgo.com/lite/"
+            params = {"q": query}
+            if region:
+                params["kl"] = region
+            headers = {"User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122 Safari/537.36"}
+            with httpx.Client(headers=headers, timeout=10.0, follow_redirects=True) as client:
+                resp = client.get(url, params=params)
+                if resp.status_code != 200:
+                    return []
+                soup = BeautifulSoup(resp.text, "html.parser")
+                items = []
+                for link in soup.select("a[href]"):
+                    href = link.get("href") or ""
+                    title = link.get_text(strip=True)
+                    if not href or not title:
+                        continue
+                    if href.startswith("http") and "duckduckgo.com" not in href:
+                        snippet = ""
+                        parent = link.find_parent("tr") or link.find_parent("td") or link.parent
+                        if parent:
+                            sn = parent.find_next_sibling("tr")
+                            if sn:
+                                snippet = sn.get_text(" ", strip=True)[:200]
+                        if (language or "en").lower().startswith("en") and not _mostly_ascii(title + " " + snippet):
+                            continue
+                        items.append({"title": title, "url": href, "snippet": snippet})
+                        if len(items) >= num_results:
+                            break
+                return items
+        except Exception:
+            return []
+
+def _normalize_command(text: str) -> str:
+    """Normalize LLM output to a safe, executable shell command string.
+
+    - Strip code fences ``` and language hints like ```bash
+    - Remove leading prompts like "$ " or "> "
+    - If first token is a standalone 'bash' on its own line, drop it
+    - Collapse multiple lines into ' && '
+    - Trim quotes/backticks
+    """
+    t = (text or "").strip()
+    if not t:
+        return t
+    # Remove surrounding triple backticks (with optional language)
+    if t.startswith("```"):
+        t = t[3:]
+        # Drop optional language identifier
+        if "\n" in t:
+            t = t.split("\n", 1)[1]
+        # Remove closing fence
+        if t.endswith("```"):
+            t = t[:-3]
+    # Strip single backticks and quotes around the whole thing
+    t = t.strip().strip("`").strip()
+    # Split lines and clean each
+    lines = [ln.strip() for ln in t.replace("\r", "\n").split("\n") if ln.strip()]
+    if not lines:
+        return ""
+    # If first line is just 'bash' (common with some models), drop it
+    if lines and lines[0].lower() == "bash":
+        lines = lines[1:]
+    # Drop leading shell prompts
+    cleaned = []
+    for ln in lines:
+        if ln.startswith("$ "):
+            ln = ln[2:].strip()
+        if ln.startswith("> "):
+            ln = ln[2:].strip()
+        cleaned.append(ln)
+    # Join multiple commands conservatively
+    cmd = " && ".join(cleaned)
+    return cmd.strip()
 
     def _should_chat(self, text: str) -> bool:
         """Heuristic to decide if input should be handled as natural chat."""
@@ -810,7 +978,15 @@ def ask(query, execute, explain):
         async def run():
             if await shell.connect():
                 try:
-                    await shell.interactive_mode()
+                    # Prefer bound method
+                    if hasattr(shell, "interactive_mode") and callable(getattr(shell, "interactive_mode")):
+                        await shell.interactive_mode()  # type: ignore
+                    else:
+                        # Fallback: call module-level function interactive_mode(self)
+                        try:
+                            await globals().get("interactive_mode")(shell)  # type: ignore
+                        except Exception:
+                            raise AttributeError("Interactive mode entry not found")
                 finally:
                     await shell.disconnect()
         
@@ -1431,27 +1607,46 @@ def overlay(hotkey: bool, tray: bool, toggle: bool, show: bool, hide: bool):
         from neuralux.memory import SessionStore, default_session_id
         store = SessionStore(NeuraluxConfig())
         session_id = default_session_id()
+        user_id = session_id.split("@")[0]
         try:
             if not await shell.connect():
                 return "Message bus not available"
             # Handle built-in overlay commands
             t = text.strip()
             if t.startswith("/ocr"):
-                # Parse: /ocr, /ocr window, /ocr region x,y,w,h
+                # Parse: /ocr, /ocr window, /ocr region x,y,w,h, /ocr select
                 mode = ""
                 parts = t.split()
                 if len(parts) >= 2:
                     mode = parts[1].lower()
                 region = None
                 window = False
-                if mode == "window":
+                overlay_hidden = False
+                if mode == "select":
+                    # Use slop (if installed) to select a region interactively
+                    try:
+                        import subprocess as _sp
+                        # Hide overlay before launching selector to avoid capturing it
+                        try:
+                            from overlay.overlay_window import OverlayApplication  # type: ignore
+                            if app and app.window and hasattr(app.window, "hide_overlay"):
+                                app.window.hide_overlay()
+                                overlay_hidden = True
+                        except Exception:
+                            pass
+                        # Red border (r,g,b,a) with width 3
+                        out = _sp.check_output(["bash", "-lc", "command -v slop >/dev/null 2>&1 && slop -b 3 -c 1,0,0,0.9 -f '%x,%y,%w,%h' || true"], stderr=_sp.DEVNULL, text=True)
+                        region = (out or "").strip() or None
+                    except Exception:
+                        region = None
+                elif mode == "window":
                     window = True
                 elif mode == "region" and len(parts) >= 3:
                     region = parts[2]
                 # If we own the overlay window, hide it briefly to avoid capturing itself
                 try:
                     from overlay.overlay_window import OverlayApplication  # type: ignore
-                    if app and app.window and hasattr(app.window, "hide_overlay"):
+                    if (not overlay_hidden) and app and app.window and hasattr(app.window, "hide_overlay"):
                         app.window.hide_overlay()
                 except Exception:
                     pass
@@ -1509,7 +1704,185 @@ def overlay(hotkey: bool, tray: bool, toggle: bool, show: bool, hide: bool):
                 state["chat_history"] = []
                 state["context_text"] = ""
                 state["context_kind"] = ""
+                # Archive previous conversation first (if any)
+                try:
+                    prev = store.load(session_id)
+                    if (prev.get("chat_history") or prev.get("context_text")):
+                        store.archive(user_id, prev)
+                except Exception:
+                    pass
                 store.reset(session_id)
+                return {"_overlay_render": "notice", "title": "New conversation", "text": "Memory cleared."}
+
+            if t == "/history":
+                # Page query: /history <page> (1-based)
+                page = 1
+                parts = t.split()
+                if len(parts) >= 2:
+                    try:
+                        page = max(1, int(parts[1]))
+                    except Exception:
+                        page = 1
+                size = 20
+                data = store.load(session_id)
+                hist = data.get("chat_history") or []
+                start = max(0, len(hist) - page * size)
+                items = hist[start: start + size]
+                items = items if items else []
+                archives = []
+                try:
+                    archives = store.list_archives(user_id, start=0, count=10)
+                except Exception:
+                    archives = []
+                return {"_overlay_render": "history", "items": items, "page": page, "archives": archives}
+
+            if t.startswith("/restore "):
+                # Restore archived session by id
+                try:
+                    arch_id = int(t.split()[1])
+                except Exception:
+                    return "Usage: /restore <id> (see /history for IDs)"
+                arc = store.get_archive(user_id, arch_id)
+                if not arc:
+                    return f"No archive with id {arch_id}"
+                # Replace current session contents
+                data = store.load(session_id)
+                data.update({
+                    "context_text": arc.get("context_text", ""),
+                    "context_kind": arc.get("context_kind", ""),
+                    "chat_history": arc.get("chat_history", []) or [],
+                })
+                store.save(session_id, data)
+                state["chat_mode"] = True
+                state["chat_history"] = data.get("chat_history") or []
+                state["context_text"] = data.get("context_text") or ""
+                state["context_kind"] = data.get("context_kind") or ""
+                return {"_overlay_render": "notice", "title": "Session restored", "text": f"Loaded archive {arch_id}."}
+
+            if t == "/refresh":
+                return {"_overlay_render": "refresh"}
+
+            if t.startswith("/set "):
+                # Simple in-memory toggles; persistence via /settings.save
+                try:
+                    key, value = t[len("/set "):].split(" ", 1)
+                    key = key.strip().lower()
+                    value = value.strip()
+                    if key == "llm.model":
+                        data = store.load(session_id)
+                        data["llm_model"] = value
+                        store.save(session_id, data)
+                        # Ask LLM service (best-effort) to swap model
+                        try:
+                            # Notify UI: reloading
+                            try:
+                                GLib.idle_add(lambda: (app.window and hasattr(app.window, "begin_busy") and app.window.begin_busy("Reloading LLM model…")) or False)
+                            except Exception:
+                                pass
+                            import httpx as _http
+                            url = f"http://localhost:{LLMServiceConfig().service_port}/v1/model/load"  # type: ignore
+                            with _http.Client(timeout=60.0) as client:
+                                client.post(url, params={"model_name": value})
+                            # Subscribe briefly to LLM reload events and surface lines in overlay
+                            try:
+                                import asyncio as __asyncio
+                                from neuralux.messaging import MessageBusClient as __Bus, NeuraluxConfig as __Cfg  # type: ignore
+                                async def _stream():
+                                    bus = __Bus(__Cfg())
+                                    await bus.connect()
+                                    async def _cb(d):
+                                        try:
+                                            GLib.idle_add(lambda: (app.window and app.window.add_result("LLM Reload", str(d))) or False)
+                                        except Exception:
+                                            pass
+                                    await bus.subscribe("ai.llm.reload.events", _cb)
+                                    await __asyncio.sleep(2.5)
+                                    await bus.disconnect()
+                                __asyncio.create_task(_stream())
+                            except Exception:
+                                pass
+                            try:
+                                GLib.idle_add(lambda: (app.window and hasattr(app.window, "end_busy") and app.window.end_busy("LLM model ready")) or False)
+                                GLib.idle_add(lambda: (app.window and hasattr(app.window, "show_toast") and app.window.show_toast("LLM model reloaded")) or False)
+                            except Exception:
+                                pass
+                        except Exception:
+                            try:
+                                GLib.idle_add(lambda: (app.window and hasattr(app.window, "end_busy") and app.window.end_busy("LLM reload failed")) or False)
+                            except Exception:
+                                pass
+                        return {"_overlay_render": "notice", "title": "LLM model", "text": f"Set to {value}"}
+                    if key == "stt.model":
+                        data = store.load(session_id)
+                        data["stt_model"] = value
+                        store.save(session_id, data)
+                        # Ask Audio service to switch STT model
+                        try:
+                            # Notify UI: reloading
+                            try:
+                                GLib.idle_add(lambda: (app.window and hasattr(app.window, "begin_busy") and app.window.begin_busy("Switching STT model…")) or False)
+                            except Exception:
+                                pass
+                            import httpx as _http
+                            url = f"http://localhost:{AudioServiceConfig().service_port}/stt/model"  # type: ignore
+                            with _http.Client(timeout=30.0) as client:
+                                client.post(url, params={"name": value})
+                            try:
+                                GLib.idle_add(lambda: (app.window and hasattr(app.window, "end_busy") and app.window.end_busy("STT model ready")) or False)
+                                GLib.idle_add(lambda: (app.window and hasattr(app.window, "show_toast") and app.window.show_toast("STT model switched")) or False)
+                            except Exception:
+                                pass
+                        except Exception:
+                            try:
+                                GLib.idle_add(lambda: (app.window and hasattr(app.window, "end_busy") and app.window.end_busy("STT switch failed")) or False)
+                            except Exception:
+                                pass
+                        return {"_overlay_render": "notice", "title": "STT model", "text": f"Set to {value}"}
+                except Exception:
+                    return "Usage: /set <key> <value>"
+
+            if t == "/settings.save":
+                try:
+                    from neuralux.memory import SessionStore as _S
+                    from neuralux.config import NeuraluxConfig as _C
+                    _store = _S(_C())
+                    cfg = _C()
+                    path = cfg.settings_path()
+                    data = store.load(session_id)
+                    payload = {
+                        "llm_model": data.get("llm_model", cfg.ui_llm_model),
+                        "stt_model": data.get("stt_model", cfg.ui_stt_model),
+                    }
+                    _store.save_settings(path, payload)
+                    # Toast on UI thread
+                    try:
+                        GLib.idle_add(lambda: (app.window and hasattr(app.window, "show_toast") and app.window.show_toast("Settings saved")) or False)
+                    except Exception:
+                        pass
+                    return {"_overlay_render": "notice", "title": "Settings saved", "text": str(path)}
+                except Exception as e:
+                    return f"Settings save error: {e}"
+
+            if t.startswith("/set "):
+                # Simple in-memory toggles for now; in future persist to config
+                try:
+                    key, value = t[len("/set "):].split(" ", 1)
+                    key = key.strip().lower()
+                    value = value.strip()
+                    # For demo: only llm.model and stt.model keys
+                    if key == "llm.model":
+                        # Store in session for display (actual service config would be separate)
+                        data = store.load(session_id)
+                        data["llm_model"] = value
+                        store.save(session_id, data)
+                        return {"_overlay_render": "notice", "title": "LLM model", "text": f"Set to {value}"}
+                    if key == "stt.model":
+                        data = store.load(session_id)
+                        data["stt_model"] = value
+                        store.save(session_id, data)
+                        return {"_overlay_render": "notice", "title": "STT model", "text": f"Set to {value}"}
+                except Exception:
+                    return "Usage: /set <key> <value>"
                 return "Session cleared."
             if t.startswith("/tts"):
                 parts = t.split()
@@ -1727,7 +2100,7 @@ def overlay(hotkey: bool, tray: bool, toggle: bool, show: bool, hide: bool):
                 llm_result = await shell.ask_llm(said, mode="command")
                 # If the LLM returned a command, set pending approval
                 if isinstance(llm_result, str) and llm_result and not llm_result.startswith("Error"):
-                    clean_cmd = llm_result.strip().strip('`').strip()
+                    clean_cmd = _normalize_command(llm_result)
                     state["pending"] = {"type": "command", "data": {"command": clean_cmd}}
                     if state["tts_enabled"]:
                         try:
@@ -1796,10 +2169,15 @@ def overlay(hotkey: bool, tray: bool, toggle: bool, show: bool, hide: bool):
                 except Exception as e:
                     return f"Chat error: {e}"
 
+            # If the user greets or asks a general question, prefer chat mode automatically
+            lower_for_mode = text.strip().lower()
+            if any(lower_for_mode.startswith(x) for x in ["hi", "hello", "hey", "how are", "what is", "who is", "tell me", "can you", "could you"]):
+                response = await shell.ask_llm(text, mode="chat")
+                return response
             response = await shell.ask_llm(text, mode="command")
             # If we received a plausible command, set pending approval like voice mode
             if isinstance(response, str) and response and not response.startswith("Error"):
-                clean_cmd = response.strip().strip('`').strip()
+                clean_cmd = _normalize_command(response)
                 state["pending"] = {"type": "command", "data": {"command": clean_cmd}}
                 # Optionally speak
                 try:
@@ -1947,6 +2325,39 @@ def overlay(hotkey: bool, tray: bool, toggle: bool, show: bool, hide: bool):
                         pending = result.get("pending")
                         if pending and pending.get("type") == "open":
                             app.window.show_pending_action("Open top web result?", pending.get("path", ""))
+                    elif isinstance(result, dict) and result.get("_overlay_render") == "history":
+                        # Paged history + archives with restore buttons
+                        items = result.get("items", [])
+                        page = int(result.get("page", 1))
+                        if not items:
+                            app.window.add_result("History", "No messages yet")
+                        else:
+                            app.window.add_result("History", f"Page {page}")
+                            for m in items:
+                                role = m.get("role", "user")
+                                content = (m.get("content", "") or "")
+                                app.window.add_result(role.title(), content)
+                        archives = result.get("archives", []) or []
+                        if archives:
+                            if hasattr(app.window, "add_buttons_row"):
+                                # Show first 5 archives with restore
+                                btns = []
+                                for a in archives[:5]:
+                                    lbl = (a.get("title") or "conversation").strip() or "conversation"
+                                    btns.append((f"Restore: {lbl[:20]}", f"/restore {a.get('id')}") )
+                                app.window.add_buttons_row("Archived sessions", btns)
+                    elif isinstance(result, dict) and result.get("_overlay_render") == "notice":
+                        app.window.add_result(result.get("title", "Notice"), result.get("text", ""))
+                    elif isinstance(result, dict) and result.get("_overlay_render") == "refresh":
+                        # Re-render suggestions based on current entry text
+                        try:
+                            q = app.window.search_entry.get_text()
+                            app.window.clear_results()
+                            from overlay.search import suggest as _s
+                            for s in _s(q, max_results=app.window.config.max_results, threshold=app.window.config.fuzzy_threshold):
+                                app.window._add_suggestion_row(s)
+                        except Exception:
+                            pass
                     elif isinstance(result, dict) and result.get("_overlay_render") == "ocr_result":
                         text = result.get("text", "") or ""
                         # Set conversational context from OCR
@@ -2007,11 +2418,28 @@ def overlay(hotkey: bool, tray: bool, toggle: bool, show: bool, hide: bool):
                 default_icon = str(Path(__file__).parent.parent.parent / "overlay" / "assets" / "neuralux-tray.svg")
                 icon = default_icon if Path(default_icon).exists() else "utilities-terminal"
 
+            def _about():
+                try:
+                    if app.window and hasattr(app.window, "show_about_dialog"):
+                        app.window.show_about_dialog()
+                except Exception:
+                    pass
+
+            def _settings():
+                # Open native settings window if available
+                try:
+                    if app.window and hasattr(app.window, "show_settings_window"):
+                        app.window.show_settings_window()
+                except Exception:
+                    pass
+
             tray_instance = OverlayTray(
                 on_toggle=lambda: GLib.idle_add(lambda: app.window and app.window.toggle_visibility()),
                 on_quit=_quit,
                 icon_name=icon,
                 app_name=config.app_name,
+                on_about=_about,
+                on_settings=_settings,
             )
             if not tray_instance.enabled:
                 console.print("[yellow]Tray not available via in-process integration. Falling back to external helper...[/yellow]")
@@ -2070,10 +2498,25 @@ def overlay(hotkey: bool, tray: bool, toggle: bool, show: bool, hide: bool):
                         except Exception:
                             pass
 
+                    async def _on_about(_msg):
+                        try:
+                            GLib.idle_add(lambda: (app.window and hasattr(app.window, "show_about_dialog") and app.window.show_about_dialog()))
+                        except Exception:
+                            pass
+
+                    async def _on_settings(_msg):
+                        try:
+                            GLib.idle_add(lambda: (app.window and hasattr(app.window, "show_settings_window") and app.window.show_settings_window()))
+                        except Exception:
+                            pass
+
                     await bus.subscribe("ui.overlay.toggle", _on_toggle)
                     await bus.subscribe("ui.overlay.show", _on_show)
                     await bus.subscribe("ui.overlay.hide", _on_hide)
                     await bus.subscribe("ui.overlay.quit", _on_quit)
+                    await bus.subscribe("ui.overlay.about", _on_about)
+                    await bus.subscribe("ui.overlay.settings", _on_settings)
+                    # (Removed quick model selects; available in Settings window)
 
                     # Keep the task alive
                     stopper = _asyncio.Event()

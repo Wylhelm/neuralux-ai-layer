@@ -84,7 +84,7 @@ class OverlayWindow(Gtk.ApplicationWindow):
         main_box.set_margin_start(20)
         main_box.set_margin_end(20)
 
-        # Top controls (voice + speaker)
+        # Top controls (voice + speaker + session/history/ocr)
         controls_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
         controls_box.set_halign(Gtk.Align.END)
 
@@ -108,6 +108,42 @@ class OverlayWindow(Gtk.ApplicationWindow):
             pass
         controls_box.append(self.speaker_button)
         
+        # New chat button
+        self.new_chat_button = Gtk.Button(label="🆕")
+        self.new_chat_button.set_tooltip_text("Start new conversation (/fresh)")
+        try:
+            self.new_chat_button.connect("clicked", lambda _b: self.on_command("/fresh"))
+        except Exception:
+            pass
+        controls_box.append(self.new_chat_button)
+
+        # History button
+        self.history_button = Gtk.Button(label="🕘")
+        self.history_button.set_tooltip_text("Show conversation history (/history)")
+        try:
+            self.history_button.connect("clicked", lambda _b: self.on_command("/history"))
+        except Exception:
+            pass
+        controls_box.append(self.history_button)
+
+        # OCR select region button
+        self.ocr_select_button = Gtk.Button(label="🔲")
+        self.ocr_select_button.set_tooltip_text("Select screen region for OCR (/ocr select)")
+        try:
+            self.ocr_select_button.connect("clicked", lambda _b: self.on_command("/ocr select"))
+        except Exception:
+            pass
+        controls_box.append(self.ocr_select_button)
+
+        # Refresh button
+        self.refresh_button = Gtk.Button(label="↻")
+        self.refresh_button.set_tooltip_text("Refresh suggestions (/refresh)")
+        try:
+            self.refresh_button.connect("clicked", lambda _b: self.on_command("/refresh"))
+        except Exception:
+            pass
+        controls_box.append(self.refresh_button)
+
         main_box.append(controls_box)
         
         # Search entry
@@ -133,12 +169,32 @@ class OverlayWindow(Gtk.ApplicationWindow):
         
         main_box.append(scrolled)
         
-        # Status bar at bottom
+        # Status bar at bottom with spinner
+        status_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        status_box.set_halign(Gtk.Align.CENTER)
+        self.spinner = Gtk.Spinner()
+        try:
+            self.spinner.set_spinning(False)
+        except Exception:
+            pass
+        status_box.append(self.spinner)
         self.status_label = Gtk.Label()
         self.status_label.set_markup("<span size='small' alpha='60%'>Press Esc to close</span>")
-        self.status_label.set_margin_top(10)
-        self.status_label.set_halign(Gtk.Align.CENTER)
-        main_box.append(self.status_label)
+        status_box.append(self.status_label)
+        status_box.set_margin_top(10)
+        main_box.append(status_box)
+
+        # Toast overlay (simple revealer at bottom)
+        self.toast_revealer = Gtk.Revealer()
+        self.toast_revealer.set_transition_type(Gtk.RevealerTransitionType.SLIDE_UP)
+        self.toast_revealer.set_reveal_child(False)
+        toast_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        toast_box.set_halign(Gtk.Align.CENTER)
+        toast_box.get_style_context().add_class("toast")
+        self.toast_label = Gtk.Label(label="")
+        toast_box.append(self.toast_label)
+        self.toast_revealer.set_child(toast_box)
+        main_box.append(self.toast_revealer)
         
         outer.append(main_box)
         self.set_child(outer)
@@ -241,6 +297,15 @@ class OverlayWindow(Gtk.ApplicationWindow):
             css_provider,
             Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
         )
+
+        # Extra CSS for toast
+        try:
+            extra = b"""
+            .toast { background: #1f2937; color: #e5e7eb; border-radius: 8px; padding: 8px 14px; }
+            """
+            css_provider.load_from_data(css + extra)
+        except Exception:
+            pass
 
     def _on_mic_clicked(self, _button):
         """Start a single-turn voice capture via on_command."""
@@ -575,6 +640,38 @@ class OverlayWindow(Gtk.ApplicationWindow):
         suffix = f" • {self._active_app}" if self._active_app else ""
         self.status_label.set_markup(f"<span size='small' alpha='60%'>{text}{suffix}</span>")
 
+    def begin_busy(self, text: str = "Working..."):
+        """Show spinner and status text."""
+        try:
+            if hasattr(self.spinner, "start"):
+                self.spinner.start()
+        except Exception:
+            pass
+        self.set_status(text)
+
+    def end_busy(self, text: str = "Ready"):
+        """Hide spinner and set final status text."""
+        try:
+            if hasattr(self.spinner, "stop"):
+                self.spinner.stop()
+        except Exception:
+            pass
+        self.set_status(text)
+
+    def show_toast(self, text: str, timeout_ms: int = 2500):
+        try:
+            self.toast_label.set_text(text)
+            self.toast_revealer.set_reveal_child(True)
+            def _hide():
+                try:
+                    self.toast_revealer.set_reveal_child(False)
+                except Exception:
+                    pass
+                return False
+            GLib.timeout_add(timeout_ms, _hide)
+        except Exception:
+            pass
+
     def _refresh_context(self):
         """Update active application name (best-effort)."""
         try:
@@ -588,15 +685,29 @@ class OverlayWindow(Gtk.ApplicationWindow):
         return True
 
     def _detect_active_app(self) -> Optional[str]:
-        """Detect active window/app (X11 best-effort)."""
+        """Detect active window/app more reliably (X11 best-effort; safe fallback)."""
         try:
             import subprocess
-            # Try wmctrl (commonly available on X11)
-            out = subprocess.check_output(["bash", "-lc", "wmctrl -lp | awk 'NR==1{print $3}'"], stderr=subprocess.DEVNULL, text=True)
-            pid = out.strip()
+            # Prefer xdotool + xprop when available
+            cmd = "set -e; W=$(xdotool getactivewindow 2>/dev/null || true); if [ -n \"$W\" ]; then P=$(xprop -id $W _NET_WM_PID 2>/dev/null | awk -F' = ' '{print $2}'); if [ -n \"$P\" ]; then ps -p $P -o comm=; exit 0; fi; fi; echo -n"  # noqa: E501
+            out = subprocess.check_output(["bash", "-lc", cmd], stderr=subprocess.DEVNULL, text=True)
+            name = (out or "").strip()
+            if name:
+                return name
+        except Exception:
+            pass
+        try:
+            import subprocess
+            # Fallback: parse wmctrl to match active window id
+            cmd = (
+                "set -e; W=$(xprop -root _NET_ACTIVE_WINDOW 2>/dev/null | awk -F'# ' '{print $2}' | sed 's/0x/0x/'); "
+                "wmctrl -lp | awk -v wid=$W 'tolower($1)==tolower(wid){print $3; exit}'"
+            )
+            pid = subprocess.check_output(["bash", "-lc", cmd], stderr=subprocess.DEVNULL, text=True).strip()
             if pid.isdigit():
-                cmd = subprocess.check_output(["bash", "-lc", f"ps -p {pid} -o comm="], stderr=subprocess.DEVNULL, text=True).strip()
-                return cmd
+                pname = subprocess.check_output(["bash", "-lc", f"ps -p {pid} -o comm="], stderr=subprocess.DEVNULL, text=True).strip()
+                if pname:
+                    return pname
         except Exception:
             pass
         return None
@@ -629,6 +740,243 @@ class OverlayWindow(Gtk.ApplicationWindow):
         # Set a dialog type (commonly floats above normal windows)
         try:
             win.change_property(NET_WM_WINDOW_TYPE, Xatom.ATOM, 32, [NET_WM_WINDOW_TYPE_DIALOG])
+        except Exception:
+            pass
+
+    # Dialogs -------------------------------------------------------------
+    def show_about_dialog(self):
+        """Show a native About dialog if available, otherwise a simple window."""
+        try:
+            # Try Gtk.AboutDialog (GTK4)
+            if hasattr(Gtk, "AboutDialog"):
+                d = Gtk.AboutDialog()
+                d.set_program_name("Neuralux")
+                try:
+                    import importlib
+                    ver = importlib.import_module("overlay").__version__  # type: ignore
+                except Exception:
+                    ver = "0.1.0"
+                d.set_version(ver)
+                # Logo
+                try:
+                    import os as _os
+                    from gi.repository import Gio, Gdk  # type: ignore
+                    logo_path = str(__import__("pathlib").Path(__file__).parent / "assets" / "neuralux-tray.svg")
+                    if _os.path.exists(logo_path):
+                        try:
+                            # Prefer native GTK4 paintable via Gdk.Texture
+                            tex = Gdk.Texture.new_from_file(Gio.File.new_for_path(logo_path))
+                            d.set_logo(tex)
+                        except Exception:
+                            # Fallback to pixbuf → texture
+                            from gi.repository import GdkPixbuf  # type: ignore
+                            pb = GdkPixbuf.Pixbuf.new_from_file_at_size(logo_path, 196, 196)
+                            try:
+                                tex2 = Gdk.Texture.new_for_pixbuf(pb)
+                                d.set_logo(tex2)
+                            except Exception:
+                                pass
+                except Exception:
+                    pass
+                d.set_comments("Neuralux AI Layer – Desktop assistant overlay")
+                d.set_modal(True)
+                d.set_transient_for(self)
+                d.show()
+                return
+        except Exception:
+            pass
+        # Fallback simple window
+        try:
+            w = Gtk.Window(title=f"About {self.config.app_name}")
+            box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+            box.set_margin_top(16)
+            box.set_margin_bottom(16)
+            box.set_margin_start(16)
+            box.set_margin_end(16)
+            lab = Gtk.Label(label=f"{self.config.app_name}\nVersion 0.1.0")
+            lab.set_halign(Gtk.Align.CENTER)
+            box.append(lab)
+            w.set_child(box)
+            w.set_transient_for(self)
+            w.present()
+        except Exception:
+            pass
+
+    def show_settings_window(self):
+        """Show a settings window bound to persisted values and using overlay commands to apply."""
+        try:
+            from neuralux.memory import SessionStore  # type: ignore
+            from neuralux.config import NeuraluxConfig  # type: ignore
+            cfg = NeuraluxConfig()
+            store = SessionStore(cfg)
+            current = store.load_settings(cfg.settings_path())
+        except Exception:
+            current = {}
+
+        llm_default = current.get("llm_model", "llama-3.2-3b-instruct-q4_k_m.gguf")
+        stt_default = current.get("stt_model", "medium")
+
+        w = Gtk.Window(title="Settings")
+        w.set_transient_for(self)
+        w.set_default_size(480, 280)
+        vb = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
+        vb.set_margin_top(12)
+        vb.set_margin_bottom(12)
+        vb.set_margin_start(12)
+        vb.set_margin_end(12)
+
+        # LLM model
+        llm_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        llm_row.append(Gtk.Label(label="LLM model file:"))
+        llm_entry = Gtk.Entry()
+        llm_entry.set_text(llm_default)
+        llm_row.append(llm_entry)
+        vb.append(llm_row)
+
+        # Quick model family selection
+        fam_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        fam_row.append(Gtk.Label(label="Quick select:"))
+        btn_llama = Gtk.Button(label="Llama 3B")
+        btn_mistral = Gtk.Button(label="Mistral 7B")
+        try:
+            btn_llama.connect("clicked", lambda _b: llm_entry.set_text("llama-3.2-3b-instruct-q4_k_m.gguf"))
+            btn_mistral.connect("clicked", lambda _b: llm_entry.set_text("mistral-7b-instruct-q4_k_m.gguf"))
+        except Exception:
+            pass
+        fam_row.append(btn_llama)
+        fam_row.append(btn_mistral)
+        vb.append(fam_row)
+
+        # Download Mistral helper
+        dl_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        dl_btn = Gtk.Button(label="Download Mistral 7B Q4_K_M")
+        dl_note = Gtk.Label(label="(downloads to models/; size ~4GB)")
+        dl_row.append(dl_btn)
+        dl_row.append(dl_note)
+        vb.append(dl_row)
+
+        # STT model
+        stt_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        stt_row.append(Gtk.Label(label="STT model:"))
+        from gi.repository import Gtk as _Gtk  # keep namespace
+        stt_combo = _Gtk.ComboBoxText()
+        for name in ["tiny", "base", "small", "medium", "large"]:
+            stt_combo.append_text(name)
+        try:
+            stt_combo.set_active(["tiny","base","small","medium","large"].index(stt_default) if stt_default in ["tiny","base","small","medium","large"] else 3)
+        except Exception:
+            pass
+        stt_row.append(stt_combo)
+        vb.append(stt_row)
+
+        # Status label
+        info = Gtk.Label(label="")
+        vb.append(info)
+
+        # Buttons
+        btns = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        apply_btn = Gtk.Button(label="Apply")
+        save_btn = Gtk.Button(label="Save Defaults")
+        close_btn = Gtk.Button(label="Close")
+        btns.append(apply_btn)
+        btns.append(save_btn)
+        btns.append(close_btn)
+        vb.append(btns)
+
+        def _apply(_b):
+            try:
+                self.begin_busy("Applying settings…")
+            except Exception:
+                pass
+            # Apply via overlay commands so existing logic triggers service calls
+            try:
+                self.on_command(f"/set llm.model {llm_entry.get_text().strip()}")
+                sel = stt_combo.get_active_text()
+                if sel:
+                    self.on_command(f"/set stt.model {sel}")
+                info.set_text("Applied. Models will reload if required.")
+            except Exception:
+                info.set_text("Failed to apply.")
+            finally:
+                try:
+                    self.end_busy("Ready")
+                except Exception:
+                    pass
+
+        def _save(_b):
+            try:
+                self.begin_busy("Saving settings…")
+            except Exception:
+                pass
+            try:
+                self.on_command("/settings.save")
+                info.set_text("Saved defaults.")
+                self.show_toast("Settings saved")
+            except Exception:
+                info.set_text("Failed to save.")
+            finally:
+                try:
+                    self.end_busy("Ready")
+                except Exception:
+                    pass
+
+        def _close(_b):
+            try:
+                w.close()
+            except Exception:
+                pass
+
+        try:
+            apply_btn.connect("clicked", _apply)
+            save_btn.connect("clicked", _save)
+            close_btn.connect("clicked", _close)
+        except Exception:
+            pass
+
+        # Background download logic
+        def _download_mistral(_b):
+            try:
+                self.begin_busy("Downloading Mistral 7B…")
+            except Exception:
+                pass
+            import threading, os
+            from pathlib import Path as _P
+            def _worker():
+                url = "https://huggingface.co/TheBloke/Mistral-7B-Instruct-v0.2-GGUF/resolve/main/mistral-7b-instruct-v0.2.Q4_K_M.gguf"
+                # Target path in repo models/
+                try:
+                    base = (_P(__file__).parent.parent.parent / "models").resolve()
+                except Exception:
+                    base = _P.home() / "models"
+                base.mkdir(parents=True, exist_ok=True)
+                target = base / "mistral-7b-instruct-q4_k_m.gguf"
+                try:
+                    import httpx
+                    with httpx.stream("GET", url, follow_redirects=True, timeout=None) as r:
+                        r.raise_for_status()
+                        total = int(r.headers.get("content-length", "0")) or None
+                        downloaded = 0
+                        with open(target, "wb") as f:
+                            for chunk in r.iter_bytes(chunk_size=1_048_576):
+                                if chunk:
+                                    f.write(chunk)
+                                    downloaded += len(chunk)
+                                    if total:
+                                        pct = int(downloaded * 100 / total)
+                                        GLib.idle_add(lambda p=pct: self.set_status(f"Downloading Mistral… {p}%"))
+                    GLib.idle_add(lambda: (llm_entry.set_text(target.name), self.show_toast("Mistral downloaded"), self.end_busy("Ready")))
+                except Exception as e:
+                    GLib.idle_add(lambda: (self.end_busy("Ready"), self.show_toast(f"Download failed: {e}")))
+            threading.Thread(target=_worker, daemon=True).start()
+
+        try:
+            dl_btn.connect("clicked", _download_mistral)
+        except Exception:
+            pass
+
+        w.set_child(vb)
+        try:
+            w.present()
         except Exception:
             pass
 

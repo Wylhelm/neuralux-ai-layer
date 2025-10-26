@@ -7,6 +7,8 @@ import time
 from typing import Any, Dict, List, Optional
 
 import redis  # type: ignore
+import json
+from pathlib import Path
 
 from .config import NeuraluxConfig
 
@@ -48,6 +50,71 @@ class SessionStore:
 
     def reset(self, session_id: str) -> None:
         self._redis.delete(self._key(session_id))
+
+    # --- Conversation archives (multiple sessions per user) ---
+    def _archive_key(self, user_id: str) -> str:
+        return f"nlx:archive:{user_id}"
+
+    def archive(self, user_id: str, data: Dict[str, Any], max_keep: int = 50) -> None:
+        """Append current conversation data to the user's archive list.
+        Stores a compact record with id(=updated_at timestamp), context, and chat history.
+        """
+        payload = {
+            "id": int(data.get("updated_at") or int(time.time())),
+            "updated_at": int(time.time()),
+            "context_text": data.get("context_text", ""),
+            "context_kind": data.get("context_kind", ""),
+            "chat_history": data.get("chat_history", []) or [],
+        }
+        self._redis.lpush(self._archive_key(user_id), json.dumps(payload))
+        # Trim to last N entries
+        self._redis.ltrim(self._archive_key(user_id), 0, max_keep - 1)
+
+    def list_archives(self, user_id: str, start: int = 0, count: int = 10) -> list[dict]:
+        items = self._redis.lrange(self._archive_key(user_id), start, start + count - 1) or []
+        out = []
+        for raw in items:
+            try:
+                obj = json.loads(raw)
+            except Exception:
+                continue
+            # Build a small summary for display
+            title = ""
+            for m in obj.get("chat_history", []):
+                if (m.get("role") or "").lower() == "user":
+                    title = (m.get("content") or "").strip()
+                    if title:
+                        break
+            obj["title"] = title[:80]
+            out.append(obj)
+        return out
+
+    def get_archive(self, user_id: str, archive_id: int) -> dict | None:
+        items = self._redis.lrange(self._archive_key(user_id), 0, -1) or []
+        for raw in items:
+            try:
+                obj = json.loads(raw)
+            except Exception:
+                continue
+            if int(obj.get("id") or 0) == int(archive_id):
+                return obj
+        return None
+
+    # Optional persistence of simple settings on disk (JSON)
+    def load_settings(self, path: Path) -> Dict[str, Any]:
+        try:
+            if path.exists():
+                return json.loads(path.read_text())
+        except Exception:
+            pass
+        return {}
+
+    def save_settings(self, path: Path, data: Dict[str, Any]) -> None:
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(json.dumps(data, indent=2))
+        except Exception:
+            pass
 
 
 def default_session_id() -> str:

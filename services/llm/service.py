@@ -86,6 +86,31 @@ class LLMService:
                 context_size=self.config.max_context,
                 loaded=self.backend.model is not None,
             )
+        
+        @self.app.post("/v1/model/load")
+        async def load_model(model_name: str):
+            """Load/swap model by filename (in configured model_path)."""
+            try:
+                # Publish start event
+                try:
+                    await self.message_bus.publish("ai.llm.reload.events", {"event": "start", "model": model_name})
+                except Exception:
+                    pass
+                # Update config default and load
+                self.config.default_model = model_name
+                self.backend.unload_model()
+                self.backend.load_model()
+                try:
+                    await self.message_bus.publish("ai.llm.reload.events", {"event": "done", "model": model_name})
+                except Exception:
+                    pass
+                return {"status": "ok", "model": model_name}
+            except Exception as e:
+                try:
+                    await self.message_bus.publish("ai.llm.reload.events", {"event": "error", "model": model_name, "error": str(e)})
+                except Exception:
+                    pass
+                raise HTTPException(status_code=500, detail=str(e))
     
     async def _stream_response(self, request: LLMRequest):
         """Stream response generator."""
