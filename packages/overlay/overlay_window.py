@@ -411,7 +411,7 @@ class OverlayWindow(Gtk.ApplicationWindow):
         else:
             self.show()
             self.present()
-            # Ensure we are on top and raised
+            # Ensure we are on top and raised - CRITICAL for overlay behavior
             try:
                 self.set_keep_above(True)
             except Exception:
@@ -422,17 +422,13 @@ class OverlayWindow(Gtk.ApplicationWindow):
                     surface.raise_()
             except Exception:
                 pass
-            # X11: request ABOVE state from WM
+            # X11: request ABOVE state from WM immediately
             try:
                 self._ensure_above_x11()
             except Exception:
                 pass
-            # Make modal briefly to defeat focus-stealing prevention on some WMs
-            try:
-                self.set_modal(True)
-            except Exception:
-                pass
-            # Re-raise shortly after mapping to ensure we float above
+            # Aggressively re-raise and re-apply stacking hints multiple times
+            # to work around window manager focus-stealing prevention
             try:
                 def _reraises():
                     try:
@@ -446,7 +442,10 @@ class OverlayWindow(Gtk.ApplicationWindow):
                     except Exception:
                         pass
                     return False
+                # Apply at multiple intervals to catch window manager delays
+                GLib.timeout_add(50, _reraises)
                 GLib.timeout_add(100, _reraises)
+                GLib.timeout_add(200, _reraises)
             except Exception:
                 pass
             # Position window at screen center (best-effort, primarily X11)
@@ -468,9 +467,30 @@ class OverlayWindow(Gtk.ApplicationWindow):
         if not self.is_visible():
             self.toggle_visibility()
         else:
+            # Re-apply stacking when already visible
             try:
-                self.present()
                 self.set_keep_above(True)
+                self.present()
+                surface = self.get_surface()
+                if surface is not None and hasattr(surface, "raise_"):
+                    surface.raise_()
+                self._ensure_above_x11()
+            except Exception:
+                pass
+            # Re-raise after a short delay to ensure we're on top
+            try:
+                def _reraise_again():
+                    try:
+                        self.set_keep_above(True)
+                        surf = self.get_surface()
+                        if surf is not None and hasattr(surf, "raise_"):
+                            surf.raise_()
+                        self._ensure_above_x11()
+                        self.present()
+                    except Exception:
+                        pass
+                    return False
+                GLib.timeout_add(50, _reraise_again)
             except Exception:
                 pass
 
@@ -734,12 +754,35 @@ class OverlayWindow(Gtk.ApplicationWindow):
 
         NET_WM_STATE = d.intern_atom('_NET_WM_STATE')
         NET_WM_STATE_ABOVE = d.intern_atom('_NET_WM_STATE_ABOVE')
+        NET_WM_STATE_FOCUSED = d.intern_atom('_NET_WM_STATE_FOCUSED')
         NET_WM_WINDOW_TYPE = d.intern_atom('_NET_WM_WINDOW_TYPE')
         NET_WM_WINDOW_TYPE_DIALOG = d.intern_atom('_NET_WM_WINDOW_TYPE_DIALOG')
+        NET_WM_WINDOW_TYPE_UTILITY = d.intern_atom('_NET_WM_WINDOW_TYPE_UTILITY')
 
-        # Set a dialog type (commonly floats above normal windows)
+        # Set window type to utility+dialog (commonly floats above normal windows)
         try:
-            win.change_property(NET_WM_WINDOW_TYPE, Xatom.ATOM, 32, [NET_WM_WINDOW_TYPE_DIALOG])
+            win.change_property(NET_WM_WINDOW_TYPE, Xatom.ATOM, 32, 
+                              [NET_WM_WINDOW_TYPE_UTILITY, NET_WM_WINDOW_TYPE_DIALOG])
+        except Exception:
+            pass
+
+        # Send client message to add ABOVE state (1 = _NET_WM_STATE_ADD)
+        try:
+            ev = protocol.event.ClientMessage(
+                window=win,
+                client_type=NET_WM_STATE,
+                data=(32, [1, NET_WM_STATE_ABOVE, 0, 1, 0])  # source=1 means application
+            )
+            mask = X.SubstructureRedirectMask | X.SubstructureNotifyMask
+            root.send_event(ev, event_mask=mask)
+            d.flush()
+        except Exception:
+            pass
+        
+        # Also try to set the state property directly as a fallback
+        try:
+            win.change_property(NET_WM_STATE, Xatom.ATOM, 32, [NET_WM_STATE_ABOVE])
+            d.flush()
         except Exception:
             pass
 
@@ -977,19 +1020,6 @@ class OverlayWindow(Gtk.ApplicationWindow):
         w.set_child(vb)
         try:
             w.present()
-        except Exception:
-            pass
-
-        # Send client message to add ABOVE state (1 = _NET_WM_STATE_ADD)
-        try:
-            ev = protocol.event.ClientMessage(
-                window=win,
-                client_type=NET_WM_STATE,
-                data=(32, [1, NET_WM_STATE_ABOVE, 0, 0, 0])
-            )
-            mask = X.SubstructureRedirectMask | X.SubstructureNotifyMask
-            root.send_event(ev, event_mask=mask)
-            d.flush()
         except Exception:
             pass
 

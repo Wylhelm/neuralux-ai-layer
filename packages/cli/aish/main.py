@@ -395,47 +395,47 @@ Current context:
         except Exception:
             return []
 
-def _normalize_command(text: str) -> str:
-    """Normalize LLM output to a safe, executable shell command string.
+    def _normalize_command(self, text: str) -> str:
+        """Normalize LLM output to a safe, executable shell command string.
 
-    - Strip code fences ``` and language hints like ```bash
-    - Remove leading prompts like "$ " or "> "
-    - If first token is a standalone 'bash' on its own line, drop it
-    - Collapse multiple lines into ' && '
-    - Trim quotes/backticks
-    """
-    t = (text or "").strip()
-    if not t:
-        return t
-    # Remove surrounding triple backticks (with optional language)
-    if t.startswith("```"):
-        t = t[3:]
-        # Drop optional language identifier
-        if "\n" in t:
-            t = t.split("\n", 1)[1]
-        # Remove closing fence
-        if t.endswith("```"):
-            t = t[:-3]
-    # Strip single backticks and quotes around the whole thing
-    t = t.strip().strip("`").strip()
-    # Split lines and clean each
-    lines = [ln.strip() for ln in t.replace("\r", "\n").split("\n") if ln.strip()]
-    if not lines:
-        return ""
-    # If first line is just 'bash' (common with some models), drop it
-    if lines and lines[0].lower() == "bash":
-        lines = lines[1:]
-    # Drop leading shell prompts
-    cleaned = []
-    for ln in lines:
-        if ln.startswith("$ "):
-            ln = ln[2:].strip()
-        if ln.startswith("> "):
-            ln = ln[2:].strip()
-        cleaned.append(ln)
-    # Join multiple commands conservatively
-    cmd = " && ".join(cleaned)
-    return cmd.strip()
+        - Strip code fences ``` and language hints like ```bash
+        - Remove leading prompts like "$ " or "> "
+        - If first token is a standalone 'bash' on its own line, drop it
+        - Collapse multiple lines into ' && '
+        - Trim quotes/backticks
+        """
+        t = (text or "").strip()
+        if not t:
+            return t
+        # Remove surrounding triple backticks (with optional language)
+        if t.startswith("```"):
+            t = t[3:]
+            # Drop optional language identifier
+            if "\n" in t:
+                t = t.split("\n", 1)[1]
+            # Remove closing fence
+            if t.endswith("```"):
+                t = t[:-3]
+        # Strip single backticks and quotes around the whole thing
+        t = t.strip().strip("`").strip()
+        # Split lines and clean each
+        lines = [ln.strip() for ln in t.replace("\r", "\n").split("\n") if ln.strip()]
+        if not lines:
+            return ""
+        # If first line is just 'bash' (common with some models), drop it
+        if lines and lines[0].lower() == "bash":
+            lines = lines[1:]
+        # Drop leading shell prompts
+        cleaned = []
+        for ln in lines:
+            if ln.startswith("$ "):
+                ln = ln[2:].strip()
+            if ln.startswith("> "):
+                ln = ln[2:].strip()
+            cleaned.append(ln)
+        # Join multiple commands conservatively
+        cmd = " && ".join(cleaned)
+        return cmd.strip()
 
     def _should_chat(self, text: str) -> bool:
         """Heuristic to decide if input should be handled as natural chat."""
@@ -2100,7 +2100,7 @@ def overlay(hotkey: bool, tray: bool, toggle: bool, show: bool, hide: bool):
                 llm_result = await shell.ask_llm(said, mode="command")
                 # If the LLM returned a command, set pending approval
                 if isinstance(llm_result, str) and llm_result and not llm_result.startswith("Error"):
-                    clean_cmd = _normalize_command(llm_result)
+                    clean_cmd = shell._normalize_command(llm_result)
                     state["pending"] = {"type": "command", "data": {"command": clean_cmd}}
                     if state["tts_enabled"]:
                         try:
@@ -2177,7 +2177,7 @@ def overlay(hotkey: bool, tray: bool, toggle: bool, show: bool, hide: bool):
             response = await shell.ask_llm(text, mode="command")
             # If we received a plausible command, set pending approval like voice mode
             if isinstance(response, str) and response and not response.startswith("Error"):
-                clean_cmd = _normalize_command(response)
+                clean_cmd = shell._normalize_command(response)
                 state["pending"] = {"type": "command", "data": {"command": clean_cmd}}
                 # Optionally speak
                 try:
