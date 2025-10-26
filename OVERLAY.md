@@ -5,6 +5,7 @@
 - GTK4 command palette with fuzzy search
 - LLM integration via NATS
 - File search (/search) and health (/health) shortcuts
+- Web search (/web) with result summaries
 - X11 hotkey support; Wayland-friendly control via signals
 - Tray icon (Ayatana/AppIndicator) with toggle and quit
 
@@ -76,5 +77,12 @@ export OVERLAY_ENABLE_TRAY=true
 export OVERLAY_APP_NAME="Neuralux"
 export OVERLAY_TRAY_ICON="$PWD/packages/overlay/assets/neuralux-tray.svg"
 ```
+
+## Voice controls and approvals
+
+- Mic (🎤) button: single-turn voice capture; runs STT → LLM.
+- Speaker (🔇/🔊) button: toggles automatic TTS of overlay results.
+- Approvals: When an action is detected (run a command, open a file/URL), the overlay shows an Approve/Cancel bar; actions run only after explicit approval.
+- Web search: Type `/web <query>` or say “search the web for <query>” to list web results with summaries. Click a result to queue it, then Approve to open in your default browser.
 
 

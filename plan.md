@@ -54,6 +54,8 @@
   - System tray integration ✅
   - Control flags (`--toggle`, `--show`, `--hide`) ✅
   - Makefile desktop targets (`make desktop`, `make autostart`) ✅
+  - Voice controls (mic/speaker), auto TTS toggle, approvals for actions ✅
+  - Web search in overlay (`/web` + voice “search the web …”), approval to open URLs ✅
 
 ### Next Priorities
 
@@ -519,6 +521,9 @@ completed:
     - ✅ Fuzzy search implementation
     - ✅ LLM integration
     - ✅ Minimal context awareness
+    - ✅ Approvals for command execution and opening files/URLs
+    - ✅ Detailed health view in overlay (CPU/Mem/Disk/Net/Top Procs/GPU) when available
+    - ✅ Web search results with summaries and approval to open
 pending:
   - ⏳ Temporal intelligence system
 deliverables:
@@ -543,7 +548,7 @@ goals:
 deliverables:
   - Vision service skeleton with OCR endpoint and NATS stubs ✅
   - Vision service with OCR
-  - Voice assistant daemon
+  - Voice assistant daemon (overlay controls implemented; wake word pending)
   - Temporal query system
   - Advanced automation rules
 ```

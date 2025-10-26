@@ -30,6 +30,9 @@ class OverlayConfig(BaseSettings):
     enable_tray: bool = False  # Show system tray icon with toggle
     tray_icon: str = "auto"  # "auto" uses bundled icon; can be icon name or absolute path
     
+    # Voice features
+    tts_enabled_default: bool = False  # Auto TTS playback for overlay results
+    
     class Config:
         env_prefix = "OVERLAY_"
         case_sensitive = False

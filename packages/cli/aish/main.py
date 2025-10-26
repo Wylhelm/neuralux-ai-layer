@@ -13,6 +13,7 @@ from rich.markdown import Markdown
 from rich.panel import Panel
 from rich.prompt import Confirm, Prompt
 from rich.syntax import Syntax
+from rich.table import Table
 
 # Add common package to path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "common"))
@@ -35,6 +36,8 @@ class AIShell:
             "user": os.getenv("USER", "user"),
             "shell": os.getenv("SHELL", "/bin/bash"),
         }
+        # Default interaction mode: 'command' or 'chat'
+        self.chat_mode = "command"
     
     async def connect(self):
         """Connect to the message bus."""
@@ -197,6 +200,144 @@ Current context:
             return "Error: Request timed out. The LLM service might be loading the model."
         except Exception as e:
             return f"Error: {str(e)}"
+
+    def _should_chat(self, text: str) -> bool:
+        """Heuristic to decide if input should be handled as natural chat."""
+        t = (text or "").strip().lower()
+        if not t:
+            return False
+        if t.endswith("?"):
+            return True
+        q_starts = ("what ", "why ", "how ", "who ", "when ", "where ", "explain ", "tell me ")
+        return any(t.startswith(s) for s in q_starts)
+
+    async def web_search(self, query: str, num_results: int = 5, language: str = "en", region: str = "us-en") -> list:
+        """Perform a web search and return list of results with title, url, snippet.
+        Attempts to bias results to the given language/region and filters out non-English content by heuristic.
+        """
+        def _mostly_ascii(text: str) -> bool:
+            if not text:
+                return True
+            total = max(len(text), 1)
+            ascii_count = sum(1 for ch in text if ord(ch) < 128)
+            return (ascii_count / total) >= 0.8
+        # Primary: duckduckgo_search library
+        try:
+            # Prefer the new package name if installed; fallback to legacy
+            try:
+                from ddgs import DDGS  # type: ignore
+            except Exception:
+                from duckduckgo_search import DDGS  # type: ignore
+            results = []
+            try:
+                with DDGS() as ddgs:
+                    for r in ddgs.text(query, region=region or "us-en", safesearch="moderate", max_results=num_results):
+                        results.append({
+                            "title": r.get("title", ""),
+                            "url": r.get("href", r.get("url", "")),
+                            "snippet": r.get("body", r.get("abstract", "")),
+                        })
+            except Exception:
+                results = []
+            if results:
+                # Filter out non-English-ish results when language is 'en'
+                if (language or "en").lower().startswith("en"):
+                    results = [x for x in results if _mostly_ascii((x.get("title") or "") + (x.get("snippet") or ""))]
+                return results[:num_results]
+        except Exception:
+            pass
+        
+        # Fallback: scrape DuckDuckGo HTML (no JS)
+        try:
+            import httpx
+            from bs4 import BeautifulSoup  # type: ignore
+            url = "https://html.duckduckgo.com/html/"
+            params = {"q": query}
+            # Region/language hints
+            if region:
+                params["kl"] = region
+            headers = {"User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122 Safari/537.36"}
+            with httpx.Client(headers=headers, timeout=10.0, follow_redirects=True) as client:
+                resp = client.get(url, params=params)
+                if resp.status_code != 200:
+                    return []
+                soup = BeautifulSoup(resp.text, "html.parser")
+                items = []
+                # Prefer anchors with class result__a
+                for a in soup.select("a.result__a"):
+                    href = a.get("href") or ""
+                    title = a.get_text(strip=True)
+                    snippet_tag = a.find_parent("div", class_="result__body")
+                    snippet = ""
+                    if snippet_tag:
+                        s = snippet_tag.find("a", class_="result__snippet") or snippet_tag.find("div", class_="result__snippet")
+                        if s:
+                            snippet = s.get_text(" ", strip=True)
+                    # Filter on language if requested
+                    if (language or "en").lower().startswith("en") and not _mostly_ascii(title + " " + snippet):
+                        continue
+                    items.append({"title": title, "url": href, "snippet": snippet})
+                    if len(items) >= num_results:
+                        break
+                # Fallback selector if structure differs
+                if not items:
+                    for res in soup.select("div.result"):
+                        a = res.find("a", href=True)
+                        if not a:
+                            continue
+                        title = a.get_text(strip=True)
+                        href = a.get("href")
+                        snippet = ""
+                        sn = res.find(class_="result__snippet") or res.find("p")
+                        if sn:
+                            snippet = sn.get_text(" ", strip=True)
+                        if (language or "en").lower().startswith("en") and not _mostly_ascii(title + " " + snippet):
+                            continue
+                        items.append({"title": title, "url": href, "snippet": snippet})
+                        if len(items) >= num_results:
+                            break
+                return items
+        except Exception:
+            pass
+
+        # Second fallback: DuckDuckGo lite HTML
+        try:
+            import httpx
+            from bs4 import BeautifulSoup  # type: ignore
+            url = "https://lite.duckduckgo.com/lite/"
+            params = {"q": query}
+            if region:
+                params["kl"] = region
+            headers = {"User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122 Safari/537.36"}
+            with httpx.Client(headers=headers, timeout=10.0, follow_redirects=True) as client:
+                resp = client.get(url, params=params)
+                if resp.status_code != 200:
+                    return []
+                soup = BeautifulSoup(resp.text, "html.parser")
+                items = []
+                # lite page renders results as tables; links have direct hrefs
+                for link in soup.select("a[href]"):
+                    href = link.get("href") or ""
+                    title = link.get_text(strip=True)
+                    if not href or not title:
+                        continue
+                    # Heuristic: external results often have absolute URLs
+                    if href.startswith("http") and "duckduckgo.com" not in href:
+                        # Try to find a nearby snippet
+                        snippet = ""
+                        parent = link.find_parent("tr") or link.find_parent("td") or link.parent
+                        if parent:
+                            sn = parent.find_next_sibling("tr")
+                            if sn:
+                                snippet = sn.get_text(" ", strip=True)[:200]
+                        if (language or "en").lower().startswith("en") and not _mostly_ascii(title + " " + snippet):
+                            continue
+                        items.append({"title": title, "url": href, "snippet": snippet})
+                        if len(items) >= num_results:
+                            break
+                return items
+        except Exception:
+            return []
     
     async def interactive_mode(self):
         """Run in interactive mode."""
@@ -206,6 +347,8 @@ Current context:
             "Commands:\n"
             "  /explain <command> - Explain a command\n"
             "  /search <query> - Search files\n"
+            "  /web <query> - Search the web\n"
+            "  /mode chat|command - Switch interaction style\n"
             "  /help - Show help\n"
             "  /exit - Exit the shell\n"
             "  Ctrl+C - Cancel current operation",
@@ -233,6 +376,34 @@ Current context:
                     search_query = user_input[8:]
                     await self._search_files_interactive(search_query)
                     continue
+                elif user_input.startswith("/web "):
+                    q = user_input[5:].strip()
+                    with console.status("[bold yellow]Searching web...[/bold yellow]"):
+                        results = await self.web_search(q, num_results=5)
+                    if not results:
+                        console.print("[yellow]No results found or search unavailable[/yellow]")
+                    else:
+                        table = Table(title=f"Web results for: {q}")
+                        table.add_column("#", justify="right", no_wrap=True)
+                        table.add_column("Title")
+                        table.add_column("URL")
+                        table.add_column("Summary")
+                        for i, r in enumerate(results, 1):
+                            table.add_row(str(i), r.get("title", ""), r.get("url", ""), (r.get("snippet", "") or "")[:160])
+                        console.print(table)
+                        if Confirm.ask("\nOpen top result in browser?", default=False):
+                            url = results[0].get("url")
+                            if url:
+                                subprocess.Popen(["xdg-open", url])
+                    continue
+                elif user_input.startswith("/mode "):
+                    mode = user_input.split(None, 1)[1].strip().lower()
+                    if mode in ("chat", "command"):
+                        self.chat_mode = mode
+                        console.print(f"[green]Mode set to {mode}[/green]")
+                    else:
+                        console.print("[yellow]Usage: /mode chat|command[/yellow]")
+                    continue
                 elif user_input.startswith("/"):
                     console.print(f"[red]Unknown command: {user_input}[/red]")
                     continue
@@ -252,9 +423,43 @@ Current context:
                     await self._search_files_interactive(user_input)
                     continue
                 
-                # Get command from LLM
-                with console.status("[bold yellow]Thinking...[/bold yellow]"):
-                    response = await self.ask_llm(user_input, mode="command")
+                # Detect natural web search phrasing
+                lower = user_input.lower()
+                if any(kw in lower for kw in ["search the web for ", "search the web ", "web search ", "google ", "search online "]):
+                    q = lower
+                    for p in ["search the web for ", "search the web ", "web search ", "google ", "search online "]:
+                        q = q.replace(p, "")
+                    with console.status("[bold yellow]Searching web...[/bold yellow]"):
+                        results = await self.web_search(q.strip(), num_results=5)
+                    if not results:
+                        console.print("[yellow]No results found or search unavailable[/yellow]")
+                    else:
+                        table = Table(title=f"Web results for: {q.strip()}")
+                        table.add_column("#", justify="right", no_wrap=True)
+                        table.add_column("Title")
+                        table.add_column("URL")
+                        table.add_column("Summary")
+                        for i, r in enumerate(results, 1):
+                            table.add_row(str(i), r.get("title", ""), r.get("url", ""), (r.get("snippet", "") or "")[:160])
+                        console.print(table)
+                        if Confirm.ask("\nOpen top result in browser?", default=False):
+                            url = results[0].get("url")
+                            if url:
+                                subprocess.Popen(["xdg-open", url])
+                    continue
+
+                # Chat vs command routing
+                if self.chat_mode == "chat" or self._should_chat(user_input):
+                    with console.status("[bold yellow]Thinking...[/bold yellow]"):
+                        response = await self.ask_llm(user_input, mode="chat")
+                    md = Markdown(response)
+                    console.print("\n[bold]Assistant:[/bold]")
+                    console.print(Panel(md, border_style="blue"))
+                    continue
+                else:
+                    # Get a command suggestion from LLM
+                    with console.status("[bold yellow]Thinking...[/bold yellow]"):
+                        response = await self.ask_llm(user_input, mode="command")
                 
                 # Clean the response - remove markdown code blocks
                 clean_response = response.strip()
@@ -463,10 +668,42 @@ def cli(ctx):
     """Neuralux AI Shell - Natural language command interface."""
     if ctx.invoked_subcommand is None:
         # No subcommand provided, start interactive mode
-        ctx.invoke(ask)
+        # Explicitly pass defaults to avoid Click missing-args error
+        ctx.invoke(ask, query=(), execute=False, explain=False)
 
 
 @cli.command()
+@click.argument("query", nargs=-1, required=True)
+@click.option("--open", "open_first", is_flag=True, help="Open top result in browser (approval asked)")
+@click.option("--limit", "limit", default=5, help="Max results to list")
+def web(query, open_first, limit):
+    """Search the web and show results with summaries."""
+    q = " ".join(query)
+    shell = AIShell()
+
+    async def run():
+        if await shell.connect():
+            try:
+                results = await shell.web_search(q, num_results=limit)
+                if not results:
+                    console.print("[yellow]No results found or search unavailable[/yellow]")
+                    return
+                table = Table(title=f"Web results for: {q}")
+                table.add_column("#", justify="right", no_wrap=True)
+                table.add_column("Title")
+                table.add_column("URL")
+                table.add_column("Summary")
+                for i, r in enumerate(results, 1):
+                    table.add_row(str(i), r.get("title", ""), r.get("url", ""), (r.get("snippet", "") or "")[:160])
+                console.print(table)
+                if open_first:
+                    url = results[0].get("url")
+                    if url and Confirm.ask(f"Open top result in browser?", default=False):
+                        subprocess.Popen(["xdg-open", url])
+            finally:
+                await shell.disconnect()
+
+    asyncio.run(run())
 @click.argument("query", nargs=-1, required=False)
 @click.option("--execute", "-e", is_flag=True, help="Execute without confirmation")
 @click.option("--explain", is_flag=True, help="Explain the command instead")
@@ -690,7 +927,7 @@ def health(watch: bool, interval: int):
                     Layout(Panel(mem_table))
                 )
                 
-                # Right: Disks and Top Processes
+                # Right: Disks, GPUs and Top Processes
                 disks = metrics.get("disks", [])
                 disk_table = Table(title="Disks", show_header=True)
                 disk_table.add_column("Mount")
@@ -710,6 +947,23 @@ def health(watch: bool, interval: int):
                         f"[{color}]{percent:.1f}%[/{color}]"
                     )
                 
+                # GPU table (if any)
+                gpus = metrics.get("gpus", [])
+                gpu_table = None
+                if isinstance(gpus, list) and gpus:
+                    gpu_table = Table(title="NVIDIA GPU", show_header=True)
+                    gpu_table.add_column("GPU")
+                    gpu_table.add_column("Util")
+                    gpu_table.add_column("VRAM")
+                    gpu_table.add_column("Temp")
+                    gpu_table.add_column("Power")
+                    for g in gpus:
+                        util = f"{g.get('utilization_percent',0):.0f}%"
+                        vram = f"{g.get('memory_used_mb',0):.0f}/{g.get('memory_total_mb',1):.0f}MB ({g.get('memory_util_percent',0):.0f}%)"
+                        temp = f"{g.get('temperature_c','-')}°C"
+                        power = f"{g.get('power_watts','-')}/{g.get('power_limit_watts','-')}W"
+                        gpu_table.add_row(g.get('name','GPU'), util, vram, temp, power)
+
                 procs = metrics.get("top_processes", [])
                 proc_table = Table(title="Top Processes", show_header=True)
                 proc_table.add_column("PID")
@@ -725,10 +979,17 @@ def health(watch: bool, interval: int):
                         f"{proc.get('memory_percent', 0):.1f}"
                     )
                 
-                layout["right"].split_column(
-                    Layout(Panel(disk_table)),
-                    Layout(Panel(proc_table))
-                )
+                if gpu_table:
+                    layout["right"].split_column(
+                        Layout(Panel(disk_table)),
+                        Layout(Panel(gpu_table)),
+                        Layout(Panel(proc_table))
+                    )
+                else:
+                    layout["right"].split_column(
+                        Layout(Panel(disk_table)),
+                        Layout(Panel(proc_table))
+                    )
                 
                 # Footer with alerts
                 alerts = data.get("alerts", [])
@@ -1023,6 +1284,11 @@ def overlay(hotkey: bool, tray: bool, toggle: bool, show: bool, hide: bool):
 
     # Create config before using it in hotkey setup
     config = OverlayConfig()
+    # Shared overlay voice/tts/pending state
+    state = {
+        "tts_enabled": bool(getattr(config, "tts_enabled_default", False)),
+        "pending": None,  # {type: 'command'|'open', data: {...}}
+    }
 
     # If control flags are provided, send the appropriate message and exit.
     if toggle or show or hide:
@@ -1065,19 +1331,243 @@ def overlay(hotkey: bool, tray: bool, toggle: bool, show: bool, hide: bool):
         try:
             if not await shell.connect():
                 return "Message bus not available"
-            if text.startswith("/search "):
-                query = text[len("/search "):].strip()
+            # Handle built-in overlay commands
+            t = text.strip()
+            if t.startswith("/tts"):
+                parts = t.split()
+                sub = parts[1].lower() if len(parts) > 1 else "toggle"
+                if sub == "on":
+                    state["tts_enabled"] = True
+                elif sub == "off":
+                    state["tts_enabled"] = False
+                else:
+                    state["tts_enabled"] = not state["tts_enabled"]
+                # Reflect in UI
+                try:
+                    GLib.idle_add(lambda: (app.window and app.window.set_tts_enabled(state["tts_enabled"])) or False)
+                except Exception:
+                    pass
+                return f"Auto TTS: {'ON' if state['tts_enabled'] else 'OFF'}"
+            if t.startswith("/web "):
+                q = t[len("/web "):].strip()
+                results = await AIShell().web_search(q, num_results=5)
+                if not results:
+                    return "No results"
+                # Return special render for overlay (use 'path' for both files and URLs)
+                return {"_overlay_render": "web_results", "query": q, "results": results, "pending": {"type": "open", "path": results[0].get("url", "")}}
+            if t in ("/approve", "/cancel"):
+                pending = state.get("pending")
+                if not pending:
+                    return "No pending action"
+                action = t[1:]
+                # Execute or discard
+                try:
+                    if action == "approve":
+                        if pending.get("type") == "command":
+                            cmd = pending["data"].get("command", "")
+                            if not cmd:
+                                state["pending"] = None
+                                return "Nothing to run"
+                            # Execute command
+                            try:
+                                result = subprocess.run(
+                                    cmd,
+                                    shell=True,
+                                    capture_output=True,
+                                    text=True,
+                                    timeout=30,
+                                    cwd=os.getcwd(),
+                                )
+                                out = (result.stdout or "").strip()
+                                err = (result.stderr or "").strip()
+                                msg = out if out else (f"Error: {err}" if err else "Command completed")
+                                # Optionally speak
+                                if state["tts_enabled"] and msg:
+                                    await shell.speak(msg[:200])
+                                return msg
+                            finally:
+                                state["pending"] = None
+                        elif pending.get("type") == "open":
+                            path = pending["data"].get("path")
+                            if path:
+                                try:
+                                    subprocess.Popen(["xdg-open", path])
+                                    msg = f"Opened {path}"
+                                    if state["tts_enabled"]:
+                                        await shell.speak(msg)
+                                    return msg
+                                finally:
+                                    state["pending"] = None
+                        else:
+                            state["pending"] = None
+                            return "Unknown action"
+                    else:
+                        state["pending"] = None
+                        return "Cancelled"
+                finally:
+                    # Ensure UI clears pending state
+                    pass
+            if t.startswith("/queue_open "):
+                # Queue an "open file" pending action from a UI click
+                path = t[len("/queue_open "):].strip()
+                if not path:
+                    return "No path provided"
+                state["pending"] = {"type": "open", "data": {"path": path}}
+                return {"_overlay_render": "file_search", "results": [], "pending": {"type": "open", "path": path}}
+            if t in ("/voice", "/listen"):
+                # Single-turn voice capture and STT → LLM
+                try:
+                    import pyaudio, wave, tempfile
+                    audio_format = pyaudio.paInt16
+                    channels = 1
+                    rate = 16000
+                    chunk = 1024
+                    p = pyaudio.PyAudio()
+                    stream = p.open(format=audio_format, channels=channels, rate=rate, input=True, frames_per_buffer=chunk)
+                    frames = []
+                    # Fixed 5s capture for overlay voice
+                    for _ in range(0, int(rate / chunk * 5)):
+                        data = stream.read(chunk, exception_on_overflow=False)
+                        frames.append(data)
+                    stream.stop_stream(); stream.close(); p.terminate()
+                    with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
+                        temp_path = f.name
+                    wf = wave.open(temp_path, "wb")
+                    wf.setnchannels(channels)
+                    wf.setsampwidth(pyaudio.PyAudio().get_sample_size(audio_format))
+                    wf.setframerate(rate)
+                    wf.writeframes(b"".join(frames))
+                    wf.close()
+                except Exception as e:
+                    try:
+                        GLib.idle_add(lambda: (app.window and app.window.indicate_recording(False)) or False)
+                    except Exception:
+                        pass
+                    return f"Recording error: {e}"
+
+                # Indicate recording done
+                try:
+                    GLib.idle_add(lambda: (app.window and app.window.indicate_recording(False)) or False)
+                except Exception:
+                    pass
+
+                # STT request
+                try:
+                    stt_resp = await shell.message_bus.request(
+                        "ai.audio.stt",
+                        {"audio_path": temp_path, "vad_filter": True, "language": "auto"},
+                        timeout=45.0,
+                    )
+                finally:
+                    try:
+                        Path(temp_path).unlink()
+                    except Exception:
+                        pass
+
+                if "error" in stt_resp:
+                    return f"STT error: {stt_resp.get('error')}"
+                said = (stt_resp.get("text") or "").strip()
+                if not said:
+                    return "No speech detected"
+                # Route voice intent: search vs command vs health
+                lower = said.lower()
+                # Voice: web search intent
+                if any(kw in lower for kw in ["search the web for ", "search the web ", "web search ", "google ", "search online "]):
+                    q = lower
+                    for p in ["search the web for ", "search the web ", "web search ", "google ", "search online "]:
+                        q = q.replace(p, "")
+                    results = await AIShell().web_search(q.strip(), num_results=5)
+                    if not results:
+                        return "No results"
+                    # Show web results and queue approval to open top result
+                    state["pending"] = {"type": "open", "data": {"path": results[0].get("url", "")}}
+                    return {"_overlay_render": "web_results", "query": q.strip(), "results": results, "pending": {"type": "open", "path": results[0].get("url", "")}}
+                if lower.startswith("search ") or any(k in lower for k in ["find files", "search files", "locate files", "document containing", "documents about"]):
+                    query = lower.replace("search ", "", 1)
+                    result = await shell.search_files(query)
+                    if "error" in result:
+                        return result.get("error")
+                    items = result.get("results", [])
+                    # If there is a clear top result, set pending open
+                    if items:
+                        top = items[0]
+                        state["pending"] = {"type": "open", "data": {"path": top.get("file_path", "")}}
+                        return {"_overlay_render": "file_search", "results": items, "pending": {"type": "open", "path": top.get("file_path", "")}}
+                    return {"_overlay_render": "file_search", "results": []}
+                if lower.strip() in ("health", "check health", "system health", "check system health"):
+                    try:
+                        summary = await shell.message_bus.request("system.health.summary", {}, timeout=5.0)
+                        return {"_overlay_render": "health", "data": summary}
+                    except Exception as e:
+                        return f"Health error: {e}"
+
+                # Default: get command suggestion
+                llm_result = await shell.ask_llm(said, mode="command")
+                # If the LLM returned a command, set pending approval
+                if isinstance(llm_result, str) and llm_result and not llm_result.startswith("Error"):
+                    clean_cmd = llm_result.strip().strip('`').strip()
+                    state["pending"] = {"type": "command", "data": {"command": clean_cmd}}
+                    if state["tts_enabled"]:
+                        try:
+                            await shell.speak(f"I'll run: {clean_cmd}. Say approve to continue.")
+                        except Exception:
+                            pass
+                    return {"_overlay_render": "voice_result", "heard": said, "result": clean_cmd, "pending": {"type": "command"}}
+                # Otherwise, just return the text result
+                if state["tts_enabled"] and isinstance(llm_result, str) and llm_result:
+                    try:
+                        await shell.speak(llm_result)
+                    except Exception:
+                        pass
+                return {"_overlay_render": "voice_result", "heard": said, "result": llm_result}
+            # Natural text routing (parity with voice)
+            lower_text = text.lower()
+            if lower_text in ("approve", "yes", "oui", "ok") and state.get("pending"):
+                return await handle_query("/approve")
+            if lower_text in ("cancel", "no", "non", "stop") and state.get("pending"):
+                return await handle_query("/cancel")
+
+            if text.startswith("/web "):
+                q = text[len("/web "):].strip()
+                results = await AIShell().web_search(q, num_results=5)
+                if not results:
+                    return "No results"
+                return {"_overlay_render": "web_results", "query": q, "results": results, "pending": {"type": "open", "path": results[0].get("url", "")}}
+            if text.startswith("/search ") or any(k in lower_text for k in ["find files", "search files", "locate files", "document containing", "documents about"]):
+                query = text[len("/search "):].strip() if text.startswith("/search ") else lower_text
                 result = await shell.search_files(query)
                 if "error" in result:
                     return result.get("error")
-                return {"_overlay_render": "file_search", "results": result.get("results", [])}
-            if text in ("/health", "/health summary"):
+                items = result.get("results", [])
+                if items:
+                    top = items[0]
+                    state["pending"] = {"type": "open", "data": {"path": top.get("file_path", "")}}
+                    return {"_overlay_render": "file_search", "results": items, "pending": {"type": "open", "path": top.get("file_path", "")}}
+                return {"_overlay_render": "file_search", "results": []}
+            if text in ("/health", "/health summary") or lower_text in ("health", "check health", "system health", "check system health"):
                 try:
                     summary = await shell.message_bus.request("system.health.summary", {}, timeout=5.0)
                     return {"_overlay_render": "health", "data": summary}
                 except Exception as e:
                     return f"Health error: {e}"
             response = await shell.ask_llm(text, mode="command")
+            # If we received a plausible command, set pending approval like voice mode
+            if isinstance(response, str) and response and not response.startswith("Error"):
+                clean_cmd = response.strip().strip('`').strip()
+                state["pending"] = {"type": "command", "data": {"command": clean_cmd}}
+                # Optionally speak
+                try:
+                    if state["tts_enabled"]:
+                        await shell.speak(f"I'll run: {clean_cmd}. Say approve to continue.")
+                except Exception:
+                    pass
+                return {"_overlay_render": "voice_result", "heard": text, "result": clean_cmd, "pending": {"type": "command"}}
+            # Otherwise return the raw response
+            try:
+                if state["tts_enabled"] and isinstance(response, str) and response:
+                    await shell.speak(response)
+            except Exception:
+                pass
             return response
         finally:
             try:
@@ -1108,10 +1598,73 @@ def overlay(hotkey: bool, tray: bool, toggle: bool, show: bool, hide: bool):
                     if not app.window:
                         return False
                     app.window.clear_results()
+                    # Always sync TTS toggle state and clear recording indicator
+                    try:
+                        app.window.set_tts_enabled(state["tts_enabled"])  # reflect latest state
+                        app.window.indicate_recording(False)
+                    except Exception:
+                        pass
                     # If this is a special overlay command result, render accordingly
                     if isinstance(result, dict) and result.get("_overlay_render") == "health":
                         data = result.get("data", {})
-                        app.window.add_result("Health", f"Status: {data.get('status','unknown')} | CPU: {data.get('current_metrics',{}).get('cpu',{}).get('usage_percent',0):.1f}%")
+                        metrics = data.get("current_metrics", {})
+                        status = data.get("status", "unknown")
+                        # Header
+                        app.window.add_result("Health", f"Status: {status}")
+                        # CPU
+                        cpu = metrics.get("cpu", {})
+                        load_avg = cpu.get("load_average", [0, 0, 0])
+                        app.window.add_result(
+                            "CPU",
+                            f"Usage {cpu.get('usage_percent',0):.1f}% | Load {load_avg[0]:.2f} {load_avg[1]:.2f} {load_avg[2]:.2f}"
+                        )
+                        # Memory
+                        mem = metrics.get("memory", {})
+                        used_gb = mem.get("used", 0) / (1024**3)
+                        total_gb = mem.get("total", 1) / (1024**3)
+                        app.window.add_result(
+                            "Memory",
+                            f"{mem.get('percent',0):.1f}% | {used_gb:.1f}/{total_gb:.1f} GB"
+                        )
+                        # Disks (top 3)
+                        for d in (metrics.get("disks", []) or [])[:3]:
+                            used = d.get("used", 0) / (1024**3)
+                            total = d.get("total", 1) / (1024**3)
+                            app.window.add_result(
+                                f"Disk {d.get('mountpoint','')}",
+                                f"{d.get('percent',0):.1f}% | {used:.1f}/{total:.1f} GB"
+                            )
+                        # Network
+                        net = metrics.get("network", {})
+                        sent_mb = net.get("bytes_sent", 0) / (1024**2)
+                        recv_mb = net.get("bytes_recv", 0) / (1024**2)
+                        app.window.add_result(
+                            "Network",
+                            f"Sent {sent_mb:.1f} MB | Recv {recv_mb:.1f} MB | Conns {net.get('connections',0)}"
+                        )
+                        # GPU (NVIDIA)
+                        for g in (metrics.get("gpus", []) or []):
+                            vram = f"{g.get('memory_used_mb',0):.0f}/{g.get('memory_total_mb',1):.0f}MB ({g.get('memory_util_percent',0):.0f}%)"
+                            extra = []
+                            if g.get('temperature_c') is not None:
+                                extra.append(f"{g.get('temperature_c')}°C")
+                            if g.get('power_watts') is not None:
+                                extra.append(f"{g.get('power_watts')}W")
+                            app.window.add_result(
+                                f"GPU {g.get('index',0)}: {g.get('name','GPU')}",
+                                f"Util {g.get('utilization_percent',0):.0f}% | VRAM {vram}" + (" | " + " ".join(extra) if extra else "")
+                            )
+                        # Top processes (top 5)
+                        for p in (metrics.get("top_processes", []) or [])[:5]:
+                            app.window.add_result(
+                                f"PID {p.get('pid','')}: {p.get('name','')[:20]}",
+                                f"CPU {p.get('cpu_percent',0):.1f}% | Mem {p.get('memory_percent',0):.1f}%"
+                            )
+                        # Alerts
+                        alerts = data.get("alerts", [])
+                        if alerts:
+                            for a in alerts[:3]:
+                                app.window.add_result("Alert", f"{a.get('level','')}: {a.get('message','')}")
                     elif isinstance(result, dict) and result.get("_overlay_render") == "file_search":
                         items = result.get("results", [])
                         if not items:
@@ -1120,7 +1673,34 @@ def overlay(hotkey: bool, tray: bool, toggle: bool, show: bool, hide: bool):
                             for it in items[: app.window.config.max_results]:
                                 title = it.get("filename", "file")
                                 sub = it.get("file_path", "")
-                                app.window.add_result(title, sub)
+                                # Attach payload to allow clicking to queue open
+                                app.window.add_result(title, sub, payload={"type": "open", "path": sub})
+                        # If pending open set, show approval bar
+                        pending = result.get("pending")
+                        if pending and pending.get("type") == "open":
+                            app.window.show_pending_action("Open top result?", pending.get("path", ""))
+                    elif isinstance(result, dict) and result.get("_overlay_render") == "voice_result":
+                        heard = result.get("heard", "")
+                        app.window.add_result("You said", heard)
+                        res_text = result.get("result", "")
+                        app.window.add_result("Result", res_text)
+                        # If pending command, show approval bar
+                        pending = result.get("pending")
+                        if pending and pending.get("type") == "command":
+                            app.window.show_pending_action("Approve command?", res_text)
+                    
+                    elif isinstance(result, dict) and result.get("_overlay_render") == "web_results":
+                        items = result.get("results", [])
+                        if not items:
+                            app.window.add_result("Web", "No results")
+                        else:
+                            for it in items[: app.window.config.max_results]:
+                                title = it.get("title", "Result")
+                                sub = f"{it.get('url','')}\n{(it.get('snippet','') or '')[:180]}"
+                                app.window.add_result(title, sub, payload={"type": "open", "path": it.get("url", "")})
+                        pending = result.get("pending")
+                        if pending and pending.get("type") == "open":
+                            app.window.show_pending_action("Open top web result?", pending.get("path", ""))
                     else:
                         app.window.add_result("Result", result if isinstance(result, str) else str(result))
                     app.window.set_status("Done")
@@ -1236,6 +1816,12 @@ def overlay(hotkey: bool, tray: bool, toggle: bool, show: bool, hide: bool):
     except Exception:
         pass
 
+    # Initialize UI defaults once the app starts
+    try:
+        GLib.idle_add(lambda: (app.window and app.window.set_tts_enabled(state["tts_enabled"])) or False)
+    except Exception:
+        pass
+
     # Run the GTK application (blocks until closed)
     try:
         # Gtk.Application.run() expects argv or None
@@ -1340,7 +1926,7 @@ def assistant(continuous, duration, language, wake_word):
                 
                 stt_request = {
                     "audio_data": audio_data,
-                    "language": language if language else "en",  # Default to English if not specified
+                    "language": language if language else "auto",
                     "vad_filter": False  # Disable VAD for better capture in voice assistant
                 }
                 
@@ -1497,7 +2083,7 @@ def assistant(continuous, duration, language, wake_word):
                         "ai.audio.stt",
                         {
                             "audio_data": audio_data,
-                            "language": language if language else "en",
+                            "language": language if language else "auto",
                             "vad_filter": False
                         },
                         timeout=30.0

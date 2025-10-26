@@ -69,6 +69,8 @@ docker compose down -v              # Remove volumes (reset data)
 aish                    # Start interactive shell
 > "your command here"
 > /explain ps aux
+> /web how to check gpu utilization on linux
+> /mode chat            # Natural answers mode
 > /help
 > /exit
 ```
@@ -78,6 +80,7 @@ aish                    # Start interactive shell
 aish ask "find large files"              # Get command only
 aish ask "show disk usage" --execute     # Execute directly
 aish explain "tar -xzf file.tar.gz"      # Explain command
+aish web "ubuntu nvidia driver issue" --limit 5  # Web search with summaries
 aish status                              # Check services
 ```
 
@@ -115,6 +118,12 @@ aish speak "Save" --output audio.wav
 ```
 
 See `AUDIO.md` for complete voice interface documentation.
+
+Overlay voice & approvals:
+- Mic (🎤): single-turn voice capture (STT → LLM)
+- Speaker (🔇/🔊): toggle auto TTS of results
+- Approvals: actions (run command, open file/URL) require Approve/Cancel
+- Web search by voice: say “search the web for <query>”
 
 #### Tray and desktop integration (optional)
 ```bash
@@ -169,6 +178,7 @@ aish overlay --toggle
 - `AUDIO.md` - Voice interface guide
 - `OVERLAY.md` - GUI overlay guide
 - `API.md` - API reference
+- `QUICK_REFERENCE.md` - Includes /web and /mode chat
 - `TEST_RESULTS.md` - Test report
 - `plan.md` - Original project plan
 

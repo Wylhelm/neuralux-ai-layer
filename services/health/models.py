@@ -53,6 +53,19 @@ class ProcessInfo(BaseModel):
     memory_mb: float
 
 
+class GPUMetrics(BaseModel):
+    """GPU metrics (primarily NVIDIA via NVML)."""
+    index: int
+    name: str
+    utilization_percent: float
+    memory_used_mb: float
+    memory_total_mb: float
+    memory_util_percent: float
+    temperature_c: Optional[float] = None
+    power_watts: Optional[float] = None
+    power_limit_watts: Optional[float] = None
+
+
 class SystemMetrics(BaseModel):
     """Complete system metrics snapshot."""
     timestamp: datetime
@@ -61,6 +74,7 @@ class SystemMetrics(BaseModel):
     disks: List[DiskMetrics]
     network: NetworkMetrics
     top_processes: List[ProcessInfo]
+    gpus: List[GPUMetrics] = Field(default_factory=list)
     uptime_seconds: float
     boot_time: datetime
     

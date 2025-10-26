@@ -16,8 +16,8 @@ class AudioServiceConfig(BaseSettings):
     nats_subject_prefix: str = "ai.audio"
     
     # Speech-to-Text (STT)
-    stt_model: str = "base"  # tiny, base, small, medium, large
-    stt_language: str = "en"  # Language code (en, fr, es, etc.) or "auto"
+    stt_model: str = "medium"  # tiny, base, small, medium, large
+    stt_language: str = "auto"  # Language code (en, fr, es, etc.) or "auto"
     stt_device: str = "auto"  # "cuda", "cpu", or "auto"
     stt_compute_type: str = "auto"  # "int8", "float16", "float32", or "auto"
     

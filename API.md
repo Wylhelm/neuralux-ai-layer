@@ -30,6 +30,8 @@ Response (abridged):
 - `system.health.alerts` → Recent alerts
 - `system.health.summary` → Aggregated health status
 
+Includes NVIDIA GPU metrics (when NVML is available): utilization, VRAM usage, temperature, power.
+
 Example (Python):
 
 ```python
@@ -115,3 +117,7 @@ aish overlay --toggle
 aish overlay --show
 aish overlay --hide
 ```
+
+## Web Search (CLI/Overlay)
+
+The `aish` shell provides a `/web <query>` command and the overlay supports `/web` and voice phrases like “search the web for <query>”. Results show title, URL, and summary; opening a URL requires explicit approval in the overlay.

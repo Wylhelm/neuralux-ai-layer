@@ -13,6 +13,7 @@ from models import (
     DiskMetrics,
     NetworkMetrics,
     ProcessInfo,
+    GPUMetrics,
 )
 
 logger = structlog.get_logger(__name__)
@@ -162,6 +163,49 @@ class MetricsCollector:
         try:
             boot_time = datetime.fromtimestamp(psutil.boot_time())
             uptime = (datetime.now() - boot_time).total_seconds()
+            # Try to collect GPU metrics via pynvml (NVIDIA)
+            gpus = []
+            try:
+                import pynvml  # type: ignore
+                pynvml.nvmlInit()
+                count = pynvml.nvmlDeviceGetCount()
+                for i in range(count):
+                    h = pynvml.nvmlDeviceGetHandleByIndex(i)
+                    name = pynvml.nvmlDeviceGetName(h).decode("utf-8") if hasattr(pynvml.nvmlDeviceGetName(h), 'decode') else str(pynvml.nvmlDeviceGetName(h))
+                    util = pynvml.nvmlDeviceGetUtilizationRates(h)
+                    mem = pynvml.nvmlDeviceGetMemoryInfo(h)
+                    temp = None
+                    power = None
+                    limit = None
+                    try:
+                        temp = float(pynvml.nvmlDeviceGetTemperature(h, pynvml.NVML_TEMPERATURE_GPU))
+                    except Exception:
+                        pass
+                    try:
+                        power = float(pynvml.nvmlDeviceGetPowerUsage(h)) / 1000.0
+                        limit = float(pynvml.nvmlDeviceGetEnforcedPowerLimit(h)) / 1000.0
+                    except Exception:
+                        pass
+                    mem_used_mb = mem.used / (1024 * 1024)
+                    mem_total_mb = mem.total / (1024 * 1024)
+                    mem_util = (mem_used_mb / mem_total_mb * 100.0) if mem_total_mb > 0 else 0.0
+                    gpus.append(GPUMetrics(
+                        index=i,
+                        name=name,
+                        utilization_percent=float(util.gpu),
+                        memory_used_mb=mem_used_mb,
+                        memory_total_mb=mem_total_mb,
+                        memory_util_percent=mem_util,
+                        temperature_c=temp,
+                        power_watts=power,
+                        power_limit_watts=limit,
+                    ))
+                try:
+                    pynvml.nvmlShutdown()
+                except Exception:
+                    pass
+            except Exception:
+                gpus = []
             
             return SystemMetrics(
                 timestamp=datetime.now(),
@@ -170,6 +214,7 @@ class MetricsCollector:
                 disks=self.collect_disk_metrics(),
                 network=self.collect_network_metrics(),
                 top_processes=self.collect_top_processes(top_process_count),
+                gpus=gpus,
                 uptime_seconds=uptime,
                 boot_time=boot_time,
             )

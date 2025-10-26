@@ -71,7 +71,7 @@ Key packages:
 
 #### STT Models (Whisper)
 
-Models are downloaded automatically on first use. Available sizes:
+Models are downloaded automatically on first use. Default: `medium` with `language=auto`. Available sizes:
 
 - **tiny** (~40MB) - Fast, basic accuracy
 - **base** (~140MB) - Good balance (default)
@@ -326,8 +326,8 @@ Configure the audio service via environment variables:
 
 ```bash
 # Speech-to-Text
-export AUDIO_STT_MODEL=base              # tiny, base, small, medium, large
-export AUDIO_STT_LANGUAGE=en             # Language code or "auto"
+export AUDIO_STT_MODEL=medium            # tiny, base, small, medium, large
+export AUDIO_STT_LANGUAGE=auto           # Language code or "auto"
 export AUDIO_STT_DEVICE=auto             # cuda, cpu, or auto
 export AUDIO_STT_COMPUTE_TYPE=auto       # int8, float16, float32, or auto
 

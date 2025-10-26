@@ -83,6 +83,32 @@ class OverlayWindow(Gtk.ApplicationWindow):
         main_box.set_margin_bottom(20)
         main_box.set_margin_start(20)
         main_box.set_margin_end(20)
+
+        # Top controls (voice + speaker)
+        controls_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        controls_box.set_halign(Gtk.Align.END)
+
+        # Mic button
+        self._recording = False
+        self.mic_button = Gtk.Button(label="🎤")
+        self.mic_button.set_tooltip_text("Record voice (/voice)")
+        try:
+            self.mic_button.connect("clicked", self._on_mic_clicked)
+        except Exception:
+            pass
+        controls_box.append(self.mic_button)
+
+        # Speaker button (TTS toggle)
+        self._tts_enabled = False
+        self.speaker_button = Gtk.Button(label="🔇")
+        self.speaker_button.set_tooltip_text("Toggle auto TTS (/tts toggle)")
+        try:
+            self.speaker_button.connect("clicked", self._on_speaker_clicked)
+        except Exception:
+            pass
+        controls_box.append(self.speaker_button)
+        
+        main_box.append(controls_box)
         
         # Search entry
         self.search_entry = Gtk.Entry()
@@ -178,6 +204,35 @@ class OverlayWindow(Gtk.ApplicationWindow):
             color: #e6edf3; /* brighter for readability */
             font-size: 14px;
         }
+
+        /* Buttons: improve contrast on dark background */
+        button {
+            background: #43465a;
+            color: #cdd6f4;
+            border: 1px solid #565a73;
+            border-radius: 8px;
+            padding: 6px 12px;
+        }
+        button:hover {
+            background: #50536a;
+            border-color: #89b4fa;
+        }
+        button:focus {
+            border-color: #89b4fa;
+        }
+        /* Approval buttons with explicit accent colors */
+        .approve {
+            background: #224034;
+            color: #d9fbe5;
+            border-color: #2ea043;
+        }
+        .approve:hover { background: #28503f; }
+        .cancel {
+            background: #4a2b2b;
+            color: #f6d0d0;
+            border-color: #d73a49;
+        }
+        .cancel:hover { background: #5a3131; }
         """
         css_provider.load_from_data(css)
         
@@ -186,6 +241,28 @@ class OverlayWindow(Gtk.ApplicationWindow):
             css_provider,
             Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
         )
+
+    def _on_mic_clicked(self, _button):
+        """Start a single-turn voice capture via on_command."""
+        try:
+            # Optimistically set recording state in UI
+            self.indicate_recording(True)
+            self.on_command("/voice")
+        except Exception:
+            # Revert on failure
+            try:
+                self.indicate_recording(False)
+            except Exception:
+                pass
+
+    def _on_speaker_clicked(self, _button):
+        """Toggle auto TTS via on_command and update UI."""
+        try:
+            self.on_command("/tts toggle")
+            # Actual state will be synced by handler; do local optimistic toggle
+            self.set_tts_enabled(not getattr(self, "_tts_enabled", False))
+        except Exception:
+            pass
     
     def _on_entry_activate(self, entry):
         """Handle Enter key in search entry."""
@@ -220,6 +297,11 @@ class OverlayWindow(Gtk.ApplicationWindow):
                 elif action_type == "health_summary":
                     # Ask health via CLI backend
                     self.on_command("/health")
+                elif action_type == "open":
+                    # Queue an approval to open the file
+                    path = payload.get("path", "")
+                    if path:
+                        self.on_command(f"/queue_open {path}")
                 else:
                     self.on_command(str(payload))
             except Exception:
@@ -317,8 +399,38 @@ class OverlayWindow(Gtk.ApplicationWindow):
         except Exception:
             pass
     
-    def add_result(self, title: str, subtitle: str = ""):
-        """Add a result to the list."""
+    def set_tts_enabled(self, enabled: bool):
+        """Update speaker toggle state (icon and tooltip)."""
+        try:
+            self._tts_enabled = bool(enabled)
+            if self._tts_enabled:
+                self.speaker_button.set_label("🔊")
+                self.speaker_button.set_tooltip_text("Auto TTS: ON (click to disable)")
+            else:
+                self.speaker_button.set_label("🔇")
+                self.speaker_button.set_tooltip_text("Auto TTS: OFF (click to enable)")
+        except Exception:
+            pass
+
+    def indicate_recording(self, active: bool):
+        """Indicate recording state on the mic button and status bar."""
+        try:
+            self._recording = bool(active)
+            if self._recording:
+                self.mic_button.set_label("⏺️")
+                self.set_status("Listening...")
+                self.mic_button.set_sensitive(False)
+            else:
+                self.mic_button.set_label("🎤")
+                self.set_status("Ready")
+                self.mic_button.set_sensitive(True)
+        except Exception:
+            pass
+
+    def add_result(self, title: str, subtitle: str = "", payload: Optional[dict] = None):
+        """Add a result to the list.
+        Optionally attach a payload dict to make the row actionable.
+        """
         row = Gtk.ListBoxRow()
         
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
@@ -339,6 +451,48 @@ class OverlayWindow(Gtk.ApplicationWindow):
             subtitle_label.get_style_context().add_class("result-content")
             box.append(subtitle_label)
         
+        if payload and isinstance(payload, dict):
+            setattr(box, "payload", payload)
+        
+        row.set_child(box)
+        self.results_list.append(row)
+
+    def show_pending_action(self, title: str, summary: str = ""):
+        """Show a pending action row with Approve/Cancel buttons."""
+        # Insert a row with buttons
+        row = Gtk.ListBoxRow()
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+
+        title_label = Gtk.Label()
+        title_label.set_markup(f"<b>{title}</b>")
+        title_label.set_halign(Gtk.Align.START)
+        box.append(title_label)
+
+        if summary:
+            summary_label = Gtk.Label()
+            summary_label.set_wrap(True)
+            summary_label.set_xalign(0.0)
+            summary_label.set_text(summary)
+            summary_label.get_style_context().add_class("result-content")
+            box.append(summary_label)
+
+        buttons = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        approve = Gtk.Button(label="Approve")
+        cancel = Gtk.Button(label="Cancel")
+        try:
+            approve.connect("clicked", lambda _b: self.on_command("/approve"))
+            cancel.connect("clicked", lambda _b: self.on_command("/cancel"))
+        except Exception:
+            pass
+        try:
+            approve.get_style_context().add_class("approve")
+            cancel.get_style_context().add_class("cancel")
+        except Exception:
+            pass
+        buttons.append(approve)
+        buttons.append(cancel)
+        box.append(buttons)
+
         row.set_child(box)
         self.results_list.append(row)
 

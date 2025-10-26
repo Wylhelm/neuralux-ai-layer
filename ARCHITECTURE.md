@@ -91,6 +91,8 @@ This document describes the current state of the Neuralux AI Layer implementatio
 - Execution preview and confirmation
 - Context awareness (cwd, git status)
 - Service status checking
+- Web search with summaries (`/web <query>`), approval to open URLs
+- Natural chat mode (`/mode chat`) for conversational answers
 
 #### User Experience
 - Syntax highlighting for commands
@@ -140,6 +142,9 @@ Implemented:
 - `ai.audio.vad` - Voice activity detection
 - `ai.audio.info` - Audio service information
 - `system.health.summary` - Current health snapshot and alerts
+
+Notes:
+- Health summary includes NVIDIA GPU metrics (utilization %, VRAM, temperature, power) when NVML is available.
 - `system.file.search` - Semantic search requests
 - `ui.overlay.toggle` - Toggle overlay visibility
 - `ui.overlay.show` - Show/focus overlay
