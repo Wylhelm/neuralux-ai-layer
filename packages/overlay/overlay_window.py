@@ -196,6 +196,7 @@ class OverlayWindow(Gtk.ApplicationWindow):
         status_box.set_halign(Gtk.Align.CENTER)
         self.spinner = Gtk.Spinner()
         try:
+            # Spinner size controlled by CSS (32x32px)
             self.spinner.set_spinning(False)
         except Exception:
             pass
@@ -205,6 +206,9 @@ class OverlayWindow(Gtk.ApplicationWindow):
         status_box.append(self.status_label)
         status_box.set_margin_top(10)
         main_box.append(status_box)
+        
+        # Track current model name
+        self._current_model = "llama-3.2-3b"  # Default, will be fetched
 
         # Toast overlay (simple revealer at bottom)
         self.toast_revealer = Gtk.Revealer()
@@ -370,6 +374,11 @@ class OverlayWindow(Gtk.ApplicationWindow):
         
         label {
             color: #cdd6f4;
+        }
+        
+        spinner {
+            min-width: 32px;
+            min-height: 32px;
         }
         
         .drag-handle {
@@ -563,6 +572,8 @@ class OverlayWindow(Gtk.ApplicationWindow):
                 self.set_keep_above(True)
             except Exception:
                 pass
+            # Fetch current model name
+            self.update_model_name()
             try:
                 surface = self.get_surface()
                 if surface is not None and hasattr(surface, "raise_"):
@@ -803,15 +814,59 @@ class OverlayWindow(Gtk.ApplicationWindow):
         self.results_list.append(row)
     
     def set_status(self, text: str):
-        """Set status bar text."""
-        suffix = f" • {self._active_app}" if self._active_app else ""
-        self.status_label.set_markup(f"<span size='small' alpha='60%'>{text}{suffix}</span>")
+        """Set status bar text with app name and model info."""
+        # Build status components
+        components = []
+        
+        # Always add Neuralux as application name
+        components.append("Neuralux")
+        
+        # Add status text
+        components.append(text)
+        
+        # Add active application if available
+        if self._active_app:
+            components.append(f"App: {self._active_app}")
+        
+        # Add model name
+        if hasattr(self, '_current_model'):
+            components.append(f"Model: {self._current_model}")
+        
+        # Join with bullets
+        status_text = " • ".join(components)
+        self.status_label.set_markup(f"<span size='small' alpha='60%'>{status_text}</span>")
 
-    def begin_busy(self, text: str = "Working..."):
+    def update_model_name(self):
+        """Fetch and update the current model name from LLM service."""
+        try:
+            import httpx
+            response = httpx.get("http://localhost:8000/v1/models", timeout=2.0)
+            if response.status_code == 200:
+                data = response.json()
+                model_name = data.get("name", "unknown")
+                # Simplify model name for display
+                if "llama" in model_name.lower():
+                    if "3.2" in model_name:
+                        self._current_model = "Llama-3.2-3B"
+                    else:
+                        self._current_model = "Llama"
+                elif "mistral" in model_name.lower():
+                    if "7b" in model_name.lower():
+                        self._current_model = "Mistral-7B"
+                    else:
+                        self._current_model = "Mistral"
+                else:
+                    # Use first part of model name
+                    self._current_model = model_name.split("-")[0].capitalize()
+        except Exception:
+            # Keep current or default
+            pass
+    
+    def begin_busy(self, text: str = "Thinking..."):
         """Show spinner and status text."""
         try:
-            if hasattr(self.spinner, "start"):
-                self.spinner.start()
+            self.spinner.set_spinning(True)
+            self.spinner.set_visible(True)
         except Exception:
             pass
         self.set_status(text)
@@ -819,8 +874,7 @@ class OverlayWindow(Gtk.ApplicationWindow):
     def end_busy(self, text: str = "Ready"):
         """Hide spinner and set final status text."""
         try:
-            if hasattr(self.spinner, "stop"):
-                self.spinner.stop()
+            self.spinner.set_spinning(False)
         except Exception:
             pass
         self.set_status(text)
@@ -1270,40 +1324,19 @@ class OverlayWindow(Gtk.ApplicationWindow):
                     import base64
                     from gi.repository import GdkPixbuf, GLib
                     
-                    # Monitor progress
-                    progress_stop = threading.Event()
-                    
-                    def _monitor_progress():
-                        try:
-                            with httpx.stream("GET", "http://localhost:8005/v1/progress-stream", timeout=None) as stream:
-                                for line in stream.iter_lines():
-                                    if progress_stop.is_set():
-                                        break
-                                    if line.startswith("data: "):
-                                        msg = line[6:]
-                                        GLib.idle_add(lambda m=msg: self.set_status(m) or False)
-                        except Exception:
-                            pass
-                    
-                    progress_thread = threading.Thread(target=_monitor_progress, daemon=True)
-                    progress_thread.start()
-                    
-                    try:
-                        response = httpx.post(
-                            "http://localhost:8005/v1/generate-image",
-                            json={
-                                "prompt": prompt,
-                                "width": width,
-                                "height": height,
-                                "num_inference_steps": steps,
-                                "model": model,
-                            },
-                            timeout=600.0,
-                        )
-                        response.raise_for_status()
-                        result = response.json()
-                    finally:
-                        progress_stop.set()
+                    response = httpx.post(
+                        "http://localhost:8005/v1/generate-image",
+                        json={
+                            "prompt": prompt,
+                            "width": width,
+                            "height": height,
+                            "num_inference_steps": steps,
+                            "model": model,
+                        },
+                        timeout=600.0,
+                    )
+                    response.raise_for_status()
+                    result = response.json()
                     
                     image_b64 = result.get("image_bytes_b64")
                     if image_b64:

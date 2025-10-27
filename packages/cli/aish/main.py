@@ -1297,6 +1297,18 @@ def status():
         except:
             console.print("[red]✗[/red] Health service: Not running")
         
+        # Check vision service
+        try:
+            import httpx
+            async with httpx.AsyncClient() as client:
+                response = await client.get("http://localhost:8005/", timeout=5.0)
+                if response.status_code == 200:
+                    console.print("[green]✓[/green] Vision service: Running")
+                else:
+                    console.print("[yellow]⚠[/yellow] Vision service: Unexpected status")
+        except:
+            console.print("[red]✗[/red] Vision service: Not running")
+        
         # Check audio service
         try:
             import httpx
@@ -2502,10 +2514,10 @@ def overlay(hotkey: bool, tray: bool, toggle: bool, show: bool, hide: bool):
 
     # Placeholder UI callback that offloads to asyncio in a thread
     def on_command(text: str):
-        # Update status immediately
+        # Update status immediately and show spinner
         try:
             if app.window is not None:
-                app.window.set_status(f"Processing: {text}")
+                app.window.begin_busy("Thinking...")
         except Exception:
             pass
 
@@ -2688,19 +2700,30 @@ def overlay(hotkey: bool, tray: bool, toggle: bool, show: bool, hide: bool):
                         # Image generation request - trigger image generation directly
                         prompt = result.get("prompt", "")
                         # Try to trigger the image generation directly
+                        is_image_gen = True
                         try:
                             if hasattr(app.window, "_generate_image_inline"):
                                 # Call the image generation method directly with the prompt
+                                # Note: _generate_image_inline will handle begin_busy/end_busy itself
                                 app.window._generate_image_inline(prompt)
+                                # DON'T call end_busy here - let the image generation handle it
                             else:
                                 app.window.add_result("Image Generation", f"Prompt: {prompt}")
                                 app.window.add_result("Tip", "Click the 🎨 button in the toolbar to generate images")
+                                is_image_gen = False
                         except Exception as e:
                             app.window.add_result("Image Generation", f"Prompt: {prompt}")
                             app.window.add_result("Error", f"Could not start image generation: {e}")
+                            is_image_gen = False
                     else:
                         app.window.add_result("Result", result if isinstance(result, str) else str(result))
-                    app.window.set_status("Done")
+                    
+                    # Stop spinner for all cases except successful image generation
+                    if not (isinstance(result, dict) and result.get("_overlay_render") == "image_gen_request" and 'is_image_gen' in locals() and is_image_gen):
+                        app.window.end_busy("Ready")
+                    
+                    # Update model name after query (in case it changed)
+                    app.window.update_model_name()
                     return False
                 GLib.idle_add(_update)
             except Exception:

@@ -176,13 +176,21 @@ class IntentClassifier:
                 "needs_approval": False
             }
         
-        # Image generation
-        image_patterns = ["generate image", "create image", "make image",
-                         "generate picture", "draw ", "paint "]
+        # Image generation (check BEFORE command detection)
+        # More flexible patterns to catch variations
+        image_patterns = [
+            "generate image", "generate an image", "generate a image",
+            "create image", "create an image", "create a image",
+            "make image", "make an image", "make a image",
+            "generate picture", "generate a picture", "generate an picture",
+            "create picture", "create a picture",
+            "draw a", "draw an", "paint a", "paint an",
+            "image of", "picture of"
+        ]
         if any(pattern in lower for pattern in image_patterns):
             return {
                 "intent": IntentType.IMAGE_GEN,
-                "confidence": 0.90,
+                "confidence": 0.95,  # Higher confidence
                 "parameters": {"prompt": user_input},
                 "reasoning": "Image generation pattern",
                 "needs_approval": False
