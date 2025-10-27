@@ -6,6 +6,8 @@ help:
 	@echo "Setup:"
 	@echo "  make install        Install all packages"
 	@echo "  make install-dev    Install with development dependencies"
+	@echo "  make enable-gpu     Enable GPU acceleration for LLM"
+	@echo "  make check-gpu      Check GPU status and requirements"
 	@echo ""
 	@echo "Services:"
 	@echo "  make start          Start all services"
@@ -151,4 +153,41 @@ desktop-clean:
 	@rm -f ~/.local/share/applications/neuralux-overlay.desktop
 	@rm -f ~/.config/autostart/neuralux-overlay.desktop
 	@echo "✓ Desktop entries removed"
+
+check-gpu:
+	@echo "Checking GPU requirements..."
+	@echo ""
+	@if command -v nvidia-smi >/dev/null 2>&1; then \
+		echo "✓ NVIDIA GPU detected:"; \
+		nvidia-smi --query-gpu=name,memory.total,driver_version --format=csv,noheader; \
+		echo ""; \
+		if [ -d "/usr/local/cuda" ] || [ -d "/usr/local/cuda-12.8" ] || command -v nvcc >/dev/null 2>&1; then \
+			echo "✓ CUDA toolkit installed"; \
+			nvcc --version 2>/dev/null | grep "release" || echo "  (nvcc in non-standard location)"; \
+			echo ""; \
+			echo "GPU Status: Ready for acceleration ✅"; \
+			echo ""; \
+			echo "Current GPU usage:"; \
+			nvidia-smi --query-compute-apps=pid,process_name,used_memory --format=csv,noheader 2>/dev/null || echo "  No GPU processes running"; \
+		else \
+			echo "⚠ CUDA toolkit not found"; \
+			echo ""; \
+			echo "Install CUDA toolkit:"; \
+			echo "  sudo apt install nvidia-cuda-toolkit build-essential cmake"; \
+			echo ""; \
+			echo "Then run: make enable-gpu"; \
+		fi; \
+	else \
+		echo "ℹ No NVIDIA GPU detected"; \
+		echo ""; \
+		echo "Neuralux will run on CPU (slower but functional)"; \
+	fi
+
+enable-gpu:
+	@echo "Enabling GPU acceleration..."
+	@if [ ! -f enable-gpu-llm.sh ]; then \
+		echo "Error: enable-gpu-llm.sh not found"; \
+		exit 1; \
+	fi
+	@bash enable-gpu-llm.sh
 

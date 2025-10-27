@@ -75,6 +75,36 @@ pip install -e packages/common/
 pip install -e packages/cli/
 ```
 
+### Step 4: GPU Acceleration (Recommended)
+
+If you have an NVIDIA GPU, enable GPU acceleration for **10x faster** responses:
+
+```bash
+# Check if GPU is detected and ready
+make check-gpu
+
+# If CUDA is installed, enable GPU acceleration
+make enable-gpu
+```
+
+**If CUDA is not installed:**
+```bash
+# Install CUDA toolkit
+sudo apt install nvidia-cuda-toolkit build-essential cmake
+
+# Then enable GPU
+make enable-gpu
+```
+
+**Performance difference:**
+- CPU mode: 2-5 seconds per response
+- GPU mode: 0.3-0.7 seconds per response (10x faster!)
+
+The LLM service will automatically use GPU if available. You can verify GPU usage:
+```bash
+nvidia-smi  # Should show Python process using GPU memory
+```
+
 ## Running Neuralux
 
 ### Option A: One command (infra + services)

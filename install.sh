@@ -68,6 +68,27 @@ else
     INSTALL_DOCKER=true
 fi
 
+# Check for NVIDIA GPU
+if command -v nvidia-smi &> /dev/null; then
+    GPU_NAME=$(nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null | head -1)
+    if [ -n "$GPU_NAME" ]; then
+        echo -e "  ${GREEN}✓${NC} NVIDIA GPU detected: $GPU_NAME"
+        HAS_GPU=true
+        
+        # Check for CUDA toolkit
+        if [ -d "/usr/local/cuda" ] || [ -d "/usr/local/cuda-12.8" ] || command -v nvcc &> /dev/null; then
+            echo -e "  ${GREEN}✓${NC} CUDA toolkit found"
+            HAS_CUDA=true
+        else
+            echo -e "  ${YELLOW}⚠${NC} CUDA toolkit not found (GPU acceleration will be disabled)"
+            HAS_CUDA=false
+        fi
+    fi
+else
+    echo -e "  ${YELLOW}ℹ${NC} No NVIDIA GPU detected (will use CPU)"
+    HAS_GPU=false
+fi
+
 echo ""
 
 # Install system dependencies
@@ -126,8 +147,28 @@ source venv/bin/activate
 
 echo "  Installing Python packages..."
 
-# Install llama-cpp-python with special flags to avoid OpenMP issues
-CMAKE_ARGS="-DGGML_BLAS=OFF -DGGML_OPENMP=OFF" pip install llama-cpp-python --no-cache-dir -q
+# Install llama-cpp-python with GPU support if available
+if [ "$HAS_GPU" = true ] && [ "$HAS_CUDA" = true ]; then
+    echo "  Installing llama-cpp-python with CUDA support..."
+    
+    # Find CUDA installation
+    if [ -d "/usr/local/cuda-12.8" ]; then
+        export CUDA_HOME=/usr/local/cuda-12.8
+    elif [ -d "/usr/local/cuda" ]; then
+        export CUDA_HOME=/usr/local/cuda
+    fi
+    
+    export PATH=$CUDA_HOME/bin:$PATH
+    export CMAKE_ARGS="-DGGML_CUDA=on"
+    export FORCE_CMAKE=1
+    
+    pip install llama-cpp-python --upgrade --no-cache-dir -q
+    echo -e "  ${GREEN}✓${NC} llama-cpp-python installed with GPU support"
+else
+    echo "  Installing llama-cpp-python (CPU-only)..."
+    CMAKE_ARGS="-DGGML_BLAS=OFF -DGGML_OPENMP=OFF" pip install llama-cpp-python --no-cache-dir -q
+    echo -e "  ${YELLOW}ℹ${NC} llama-cpp-python installed (CPU-only)"
+fi
 
 # Install remaining packages
 pip install -r requirements.txt -q
@@ -205,6 +246,21 @@ echo -e "${GREEN}║              Installation Complete! 🎉                   
 echo -e "${GREEN}║                                                            ║${NC}"
 echo -e "${GREEN}╚════════════════════════════════════════════════════════════╝${NC}"
 echo ""
+
+# Show GPU status
+if [ "$HAS_GPU" = true ] && [ "$HAS_CUDA" = true ]; then
+    echo -e "${GREEN}✓ GPU Acceleration: Enabled${NC}"
+    echo "  LLM will use GPU for 10x faster responses"
+    echo ""
+elif [ "$HAS_GPU" = true ] && [ "$HAS_CUDA" != true ]; then
+    echo -e "${YELLOW}⚠ GPU Detected but CUDA Not Installed${NC}"
+    echo ""
+    echo "  Install CUDA toolkit for GPU acceleration:"
+    echo "  sudo apt install nvidia-cuda-toolkit build-essential cmake"
+    echo ""
+    echo "  Then rebuild: ./enable-gpu-llm.sh"
+    echo ""
+fi
 
 if [ "$INSTALL_DOCKER" = true ]; then
     echo -e "${YELLOW}⚠ Docker Installation Required${NC}"

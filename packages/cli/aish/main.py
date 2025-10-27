@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Optional
 
 import click
+import structlog
 from rich.console import Console
 from rich.markdown import Markdown
 from rich.panel import Panel
@@ -15,12 +16,16 @@ from rich.prompt import Confirm, Prompt
 from rich.syntax import Syntax
 from rich.table import Table
 
+logger = structlog.get_logger(__name__)
+
 # Add common package to path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "common"))
 
 from neuralux.config import NeuraluxConfig
 from neuralux.messaging import MessageBusClient
 from neuralux.memory import SessionStore, default_session_id
+from neuralux.intent import IntentClassifier, IntentType
+from neuralux.intent_handlers import IntentHandlers, IntentRouter
 try:
     from services.llm.config import LLMServiceConfig  # type: ignore
     from services.audio.config import AudioServiceConfig  # type: ignore
@@ -51,6 +56,12 @@ class AIShell:
         }
         # Default interaction mode: 'command' or 'chat'
         self.chat_mode = "command"
+        
+        # Intent system
+        self.intent_classifier: Optional[IntentClassifier] = None
+        self.intent_handlers: Optional[IntentHandlers] = None
+        self.intent_router: Optional[IntentRouter] = None
+        self.use_intent_system = os.getenv("DISABLE_INTENT_SYSTEM", "").lower() not in ("true", "1", "yes")
 
     async def ocr(self, file_path: Optional[str] = None, region: Optional[str] = None, window: bool = False, language: Optional[str] = None) -> dict:
         """Run OCR via vision service. Region format: x,y,w,h. Window best-effort via screengrab."""
@@ -124,6 +135,16 @@ class AIShell:
         try:
             self.message_bus = MessageBusClient(self.config)
             await self.message_bus.connect()
+            
+            # Initialize intent system
+            if self.use_intent_system and self.message_bus:
+                self.intent_classifier = IntentClassifier(self.message_bus)
+                self.intent_handlers = IntentHandlers(
+                    self.message_bus,
+                    context_getter=self._get_context_info
+                )
+                self.intent_router = IntentRouter(self.intent_handlers)
+            
             return True
         except Exception as e:
             console.print(f"[red]Failed to connect to message bus: {e}[/red]")
@@ -280,6 +301,109 @@ Current context:
             return "Error: Request timed out. The LLM service might be loading the model."
         except Exception as e:
             return f"Error: {str(e)}"
+    
+    async def process_with_intent(self, user_input: str, context: dict = None) -> dict:
+        """
+        Process user input using intent classification system.
+        
+        Returns:
+            {
+                "type": "text|command_approval|search_results|error|image_generation",
+                "content": str or dict,
+                "needs_approval": bool,
+                "pending_action": dict (optional)
+            }
+        """
+        # Fallback to old method if intent system disabled or not available
+        if not self.use_intent_system or not self.intent_classifier:
+            return await self._fallback_process(user_input)
+        
+        try:
+            # Step 1: Classify intent
+            intent_result = await self.intent_classifier.classify(user_input, context or {})
+            
+            # Step 2: Route to handler
+            result = await self.intent_router.route(intent_result, user_input)
+            
+            # Step 3: Handle special cases that need external services
+            if result.get("type") == "needs_external_handler":
+                intent = result.get("intent")
+                params = result.get("parameters", {})
+                
+                if intent == IntentType.WEB_SEARCH:
+                    return await self._handle_web_search(params.get("query", user_input))
+                
+                elif intent == IntentType.FILE_SEARCH:
+                    return await self._handle_file_search(params.get("query", user_input))
+                
+                elif intent == IntentType.SYSTEM_QUERY:
+                    return await self._handle_system_query()
+                
+                elif intent == IntentType.OCR_REQUEST:
+                    return {"type": "ocr_request", "content": "", "needs_approval": False}
+            
+            return result
+            
+        except Exception as e:
+            console.print(f"[yellow]Intent system error: {e}. Using fallback.[/yellow]")
+            return await self._fallback_process(user_input)
+    
+    async def _fallback_process(self, user_input: str) -> dict:
+        """Fallback processing when intent system is unavailable."""
+        if self._should_chat(user_input):
+            response = await self.ask_llm(user_input, mode="chat")
+            return {"type": "text", "content": response, "needs_approval": False}
+        else:
+            command = await self.ask_llm(user_input, mode="command")
+            return {
+                "type": "command_approval",
+                "content": command,
+                "needs_approval": True,
+                "pending_action": {"type": "command", "command": command}
+            }
+    
+    async def _handle_web_search(self, query: str) -> dict:
+        """Handle web search intent."""
+        results = await self.web_search(query, num_results=5)
+        
+        if not results:
+            return {"type": "text", "content": "No web search results found.", "needs_approval": False}
+        
+        return {
+            "type": "search_results",
+            "subtype": "web",
+            "content": results,
+            "needs_approval": True,
+            "pending_action": {"type": "open_url", "url": results[0].get("url", "")}
+        }
+    
+    async def _handle_file_search(self, query: str) -> dict:
+        """Handle file search intent."""
+        result = await self.search_files(query)
+        
+        if "error" in result:
+            return {"type": "error", "content": result["error"], "needs_approval": False}
+        
+        items = result.get("results", [])
+        
+        if not items:
+            return {"type": "text", "content": "No files found matching your search.", "needs_approval": False}
+        
+        return {
+            "type": "search_results",
+            "subtype": "files",
+            "content": items,
+            "needs_approval": True,
+            "pending_action": {"type": "open_file", "path": items[0].get("file_path", "")}
+        }
+    
+    async def _handle_system_query(self) -> dict:
+        """Handle system health query."""
+        try:
+            summary = await self.message_bus.request("system.health.summary", {}, timeout=5.0)
+            return {"type": "system_health", "content": summary, "needs_approval": False}
+        except Exception as e:
+            return {"type": "error", "content": f"Failed to get system health: {e}", "needs_approval": False}
 
     def _should_chat(self, text: str) -> bool:
         """Heuristic to decide if input should be handled as natural chat."""
@@ -684,37 +808,100 @@ Current context:
                                 subprocess.Popen(["xdg-open", url])
                     continue
 
-                # Chat vs command routing
-                if self.chat_mode == "chat" or self._should_chat(user_input):
-                    with console.status("[bold yellow]Thinking...[/bold yellow]"):
-                        response = await self.ask_llm(user_input, mode="chat")
-                    md = Markdown(response)
+                # Process with intent system
+                with console.status("[bold yellow]Thinking...[/bold yellow]"):
+                    result = await self.process_with_intent(
+                        user_input,
+                        context={"chat_mode": self.chat_mode == "chat"}
+                    )
+                
+                # Handle result based on type
+                result_type = result.get("type")
+                
+                if result_type == "text":
+                    # Simple text response
+                    content = result.get("content", "")
+                    md = Markdown(content)
                     console.print("\n[bold]Assistant:[/bold]")
                     console.print(Panel(md, border_style="blue"))
-                    continue
+                
+                elif result_type == "command_approval":
+                    # Command needs approval
+                    command = result.get("content", "")
+                    # Clean markdown code blocks
+                    command = command.strip()
+                    if command.startswith('```'):
+                        lines = command.split('\n')
+                        lines = [l for l in lines if not l.strip().startswith('```')]
+                        command = '\n'.join(lines).strip()
+                    
+                    console.print("\n[bold]Suggested command:[/bold]")
+                    syntax = Syntax(command, "bash", theme="monokai", line_numbers=False)
+                    console.print(syntax)
+                    
+                    logger.debug("Waiting for user approval", command=command[:50])
+                    if Confirm.ask("\nExecute this command?", default=False):
+                        logger.debug("User approved, executing command")
+                        await self._execute_command(command)
+                    else:
+                        console.print("[yellow]Command not executed[/yellow]")
+                
+                elif result_type == "search_results":
+                    # Display search results
+                    subtype = result.get("subtype")
+                    content = result.get("content", [])
+                    
+                    if subtype == "web":
+                        if not content:
+                            console.print("[yellow]No web results found[/yellow]")
+                        else:
+                            table = Table(title=f"Web Search Results")
+                            table.add_column("#", justify="right", no_wrap=True)
+                            table.add_column("Title")
+                            table.add_column("URL")
+                            table.add_column("Summary")
+                            for i, r in enumerate(content, 1):
+                                table.add_row(str(i), r.get("title", ""), r.get("url", ""), (r.get("snippet", "") or "")[:160])
+                            console.print(table)
+                            
+                            if Confirm.ask("\nOpen top result in browser?", default=False):
+                                url = content[0].get("url")
+                                if url:
+                                    subprocess.Popen(["xdg-open", url])
+                    
+                    elif subtype == "files":
+                        if not content:
+                            console.print("[yellow]No files found[/yellow]")
+                        else:
+                            table = Table(title="File Search Results")
+                            table.add_column("File")
+                            table.add_column("Score", justify="right")
+                            for item in content[:10]:
+                                table.add_row(item.get("file_path", ""), f"{item.get('score', 0):.2f}")
+                            console.print(table)
+                            
+                            if content and Confirm.ask("\nOpen top result?", default=False):
+                                path = content[0].get("file_path")
+                                if path:
+                                    subprocess.Popen(["xdg-open", path])
+                
+                elif result_type == "system_health":
+                    # Display system health
+                    health_data = result.get("content", {})
+                    console.print("\n[bold]System Health:[/bold]")
+                    console.print(Panel(str(health_data), border_style="green"))
+                
+                elif result_type == "image_generation":
+                    # Image generation request
+                    prompt = result.get("prompt", result.get("content", ""))
+                    console.print(f"\n[cyan]Image generation: {prompt}[/cyan]")
+                    console.print("[yellow]Tip: Use the overlay GUI for image generation with preview![/yellow]")
+                
+                elif result_type == "error":
+                    console.print(f"[red]Error: {result.get('content')}[/red]")
+                
                 else:
-                    # Get a command suggestion from LLM
-                    with console.status("[bold yellow]Thinking...[/bold yellow]"):
-                        response = await self.ask_llm(user_input, mode="command")
-                
-                # Clean the response - remove markdown code blocks
-                clean_response = response.strip()
-                if clean_response.startswith('```'):
-                    # Remove code block markers
-                    lines = clean_response.split('\n')
-                    lines = [l for l in lines if not l.strip().startswith('```')]
-                    clean_response = '\n'.join(lines).strip()
-                
-                # Display the suggested command
-                console.print("\n[bold]Suggested command:[/bold]")
-                syntax = Syntax(clean_response, "bash", theme="monokai", line_numbers=False)
-                console.print(syntax)
-                
-                # Ask for confirmation
-                if Confirm.ask("\nExecute this command?", default=False):
-                    await self._execute_command(clean_response)
-                else:
-                    console.print("[yellow]Command not executed[/yellow]")
+                    console.print(f"[yellow]Unhandled result type: {result_type}[/yellow]")
                     
             except KeyboardInterrupt:
                 console.print("\n[yellow]Cancelled[/yellow]")
@@ -813,8 +1000,9 @@ Current context:
                 pass
     
     async def _execute_command(self, command: str):
-        """Execute a shell command."""
+        """Execute a shell command with real-time output streaming."""
         console.print("\n[bold]Executing...[/bold]")
+        logger.debug("Starting command execution", command=command[:100])
         
         # Clean up command - join multiple lines with && if needed
         command = command.strip()
@@ -824,28 +1012,54 @@ Current context:
             command = ' && '.join(commands)
         
         try:
-            result = subprocess.run(
+            # Use Popen for real-time output streaming
+            process = subprocess.Popen(
                 command,
                 shell=True,
                 cwd=self.context['cwd'],
-                capture_output=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
                 text=True,
-                timeout=30,  # 30 second timeout
+                bufsize=1,  # Line buffered
             )
             
-            if result.stdout:
-                console.print(result.stdout)
-            if result.stderr:
-                console.print(f"[red]{result.stderr}[/red]")
+            logger.debug("Process started", pid=process.pid)
             
-            if result.returncode != 0:
-                console.print(f"[red]Command failed with exit code {result.returncode}[/red]")
-            else:
-                console.print("[green]✓ Command completed successfully[/green]")
+            # Stream output in real-time
+            stdout_lines = []
+            stderr_lines = []
+            
+            try:
+                # Read stdout
+                if process.stdout:
+                    for line in process.stdout:
+                        console.print(line, end='')
+                        stdout_lines.append(line)
+                
+                # Wait for process to complete
+                returncode = process.wait(timeout=30)
+                
+                # Read any stderr
+                if process.stderr:
+                    stderr_output = process.stderr.read()
+                    if stderr_output:
+                        console.print(f"[red]{stderr_output}[/red]")
+                        stderr_lines.append(stderr_output)
+                
+                if returncode != 0:
+                    console.print(f"[red]Command failed with exit code {returncode}[/red]")
+                else:
+                    console.print("[green]✓ Command completed successfully[/green]")
+                
+                logger.debug("Command completed", returncode=returncode)
+                
+            except subprocess.TimeoutExpired:
+                logger.warning("Command timeout, killing process")
+                process.kill()
+                console.print(f"[red]Command timed out after 30 seconds[/red]")
         
-        except subprocess.TimeoutExpired:
-            console.print(f"[red]Command timed out after 30 seconds[/red]")
         except Exception as e:
+            logger.error("Command execution error", error=str(e), command=command[:100])
             console.print(f"[red]Error executing command: {e}[/red]")
     
     def _show_help(self):
@@ -2096,11 +2310,29 @@ def overlay(hotkey: bool, tray: bool, toggle: bool, show: bool, hide: bool):
                     except Exception as e:
                         return f"Health error: {e}"
 
-                # Default: get command suggestion
-                llm_result = await shell.ask_llm(said, mode="command")
-                # If the LLM returned a command, set pending approval
-                if isinstance(llm_result, str) and llm_result and not llm_result.startswith("Error"):
-                    clean_cmd = shell._normalize_command(llm_result)
+                # Use intent system to process the voice input
+                result = await shell.process_with_intent(
+                    said,
+                    context={"voice_mode": True}
+                )
+                
+                result_type = result.get("type")
+                
+                if result_type == "text":
+                    # Direct text response (greeting, explanation, instructions)
+                    content = result.get("content", "")
+                    if state["tts_enabled"] and content:
+                        try:
+                            await shell.speak(content[:220])
+                        except Exception:
+                            pass
+                    # Return formatted voice result WITHOUT pending approval
+                    return {"_overlay_render": "voice_result", "heard": said, "result": content}
+                
+                elif result_type == "command_approval":
+                    # Command needs approval
+                    command = result.get("content", "")
+                    clean_cmd = shell._normalize_command(command)
                     state["pending"] = {"type": "command", "data": {"command": clean_cmd}}
                     if state["tts_enabled"]:
                         try:
@@ -2108,13 +2340,41 @@ def overlay(hotkey: bool, tray: bool, toggle: bool, show: bool, hide: bool):
                         except Exception:
                             pass
                     return {"_overlay_render": "voice_result", "heard": said, "result": clean_cmd, "pending": {"type": "command"}}
-                # Otherwise, just return the text result
-                if state["tts_enabled"] and isinstance(llm_result, str) and llm_result:
-                    try:
-                        await shell.speak(llm_result)
-                    except Exception:
-                        pass
-                return {"_overlay_render": "voice_result", "heard": said, "result": llm_result}
+                
+                elif result_type == "search_results":
+                    # Handle search results from intent system
+                    subtype = result.get("subtype")
+                    content = result.get("content", [])
+                    
+                    if subtype == "web":
+                        pending = {"type": "open", "path": content[0].get("url", "")} if content else None
+                        if pending:
+                            state["pending"] = {"type": "open", "data": pending}
+                        return {"_overlay_render": "web_results", "query": said, "results": content, "pending": pending}
+                    
+                    elif subtype == "files":
+                        pending = {"type": "open", "path": content[0].get("file_path", "")} if content else None
+                        if pending:
+                            state["pending"] = {"type": "open", "data": pending}
+                        return {"_overlay_render": "file_search", "results": content, "pending": pending}
+                
+                elif result_type == "system_health":
+                    # System health query
+                    health_data = result.get("content", {})
+                    return {"_overlay_render": "health", "data": health_data}
+                
+                elif result_type == "image_generation":
+                    # Image generation
+                    prompt = result.get("prompt", result.get("content", ""))
+                    return {"_overlay_render": "image_gen_request", "prompt": prompt}
+                
+                elif result_type == "error":
+                    error_msg = result.get("content", "An error occurred")
+                    return {"_overlay_render": "voice_result", "heard": said, "result": error_msg}
+                
+                else:
+                    # Fallback
+                    return {"_overlay_render": "voice_result", "heard": said, "result": "I'm not sure how to help with that."}
             # Natural text routing (parity with voice)
             lower_text = text.lower()
             if lower_text in ("approve", "yes", "oui", "ok") and state.get("pending"):
@@ -2169,30 +2429,71 @@ def overlay(hotkey: bool, tray: bool, toggle: bool, show: bool, hide: bool):
                 except Exception as e:
                     return f"Chat error: {e}"
 
-            # If the user greets or asks a general question, prefer chat mode automatically
-            lower_for_mode = text.strip().lower()
-            if any(lower_for_mode.startswith(x) for x in ["hi", "hello", "hey", "how are", "what is", "who is", "tell me", "can you", "could you"]):
-                response = await shell.ask_llm(text, mode="chat")
-                return response
-            response = await shell.ask_llm(text, mode="command")
-            # If we received a plausible command, set pending approval like voice mode
-            if isinstance(response, str) and response and not response.startswith("Error"):
-                clean_cmd = shell._normalize_command(response)
+            # Use intent system for natural text routing
+            result = await shell.process_with_intent(
+                text,
+                context={"chat_mode": state.get("chat_mode", False)}
+            )
+            
+            result_type = result.get("type")
+            
+            if result_type == "text":
+                # Direct text response (greeting, explanation, instructions)
+                content = result.get("content", "")
+                if state["tts_enabled"] and content:
+                    try:
+                        await shell.speak(content[:220])
+                    except Exception:
+                        pass
+                # Return formatted voice result WITHOUT pending approval
+                return {"_overlay_render": "voice_result", "heard": text, "result": content}
+            
+            elif result_type == "command_approval":
+                # Command needs approval
+                command = result.get("content", "")
+                clean_cmd = shell._normalize_command(command)
                 state["pending"] = {"type": "command", "data": {"command": clean_cmd}}
-                # Optionally speak
-                try:
-                    if state["tts_enabled"]:
+                if state["tts_enabled"]:
+                    try:
                         await shell.speak(f"I'll run: {clean_cmd}. Say approve to continue.")
-                except Exception:
-                    pass
+                    except Exception:
+                        pass
                 return {"_overlay_render": "voice_result", "heard": text, "result": clean_cmd, "pending": {"type": "command"}}
-            # Otherwise return the raw response
-            try:
-                if state["tts_enabled"] and isinstance(response, str) and response:
-                    await shell.speak(response)
-            except Exception:
-                pass
-            return response
+            
+            elif result_type == "search_results":
+                # Search results
+                subtype = result.get("subtype")
+                content = result.get("content", [])
+                
+                if subtype == "web":
+                    pending = {"type": "open", "path": content[0].get("url", "")} if content else None
+                    if pending:
+                        state["pending"] = {"type": "open", "data": pending}
+                    return {"_overlay_render": "web_results", "query": text, "results": content, "pending": pending}
+                
+                elif subtype == "files":
+                    pending = {"type": "open", "path": content[0].get("file_path", "")} if content else None
+                    if pending:
+                        state["pending"] = {"type": "open", "data": pending}
+                    return {"_overlay_render": "file_search", "results": content, "pending": pending}
+            
+            elif result_type == "system_health":
+                # System health
+                health_data = result.get("content", {})
+                return {"_overlay_render": "health", "data": health_data}
+            
+            elif result_type == "image_generation":
+                # Image generation - trigger the image gen flow
+                prompt = result.get("prompt", result.get("content", ""))
+                # The overlay has image generation support, so pass it through
+                return {"_overlay_render": "image_gen_request", "prompt": prompt}
+            
+            elif result_type == "error":
+                return result.get("content", "An error occurred")
+            
+            else:
+                # Fallback
+                return "I'm not sure how to help with that."
         finally:
             try:
                 await shell.disconnect()
@@ -2383,6 +2684,20 @@ def overlay(hotkey: bool, tray: bool, toggle: bool, show: bool, hide: bool):
                                     ("Start fresh", "/fresh"),
                                 ],
                             )
+                    elif isinstance(result, dict) and result.get("_overlay_render") == "image_gen_request":
+                        # Image generation request - trigger image generation directly
+                        prompt = result.get("prompt", "")
+                        # Try to trigger the image generation directly
+                        try:
+                            if hasattr(app.window, "_generate_image_inline"):
+                                # Call the image generation method directly with the prompt
+                                app.window._generate_image_inline(prompt)
+                            else:
+                                app.window.add_result("Image Generation", f"Prompt: {prompt}")
+                                app.window.add_result("Tip", "Click the 🎨 button in the toolbar to generate images")
+                        except Exception as e:
+                            app.window.add_result("Image Generation", f"Prompt: {prompt}")
+                            app.window.add_result("Error", f"Could not start image generation: {e}")
                     else:
                         app.window.add_result("Result", result if isinstance(result, str) else str(result))
                     app.window.set_status("Done")
@@ -2680,67 +2995,67 @@ def assistant(continuous, duration, language, wake_word):
                     await shell.speak("Goodbye! Have a great day!")
                     break
                 
-                # Step 3: Process with LLM
+                # Step 3: Process with intent system
                 console.print("[yellow]🤔 Thinking...[/yellow]")
                 
-                # Try to get a command suggestion first
-                suggested_command = await shell.ask_llm(user_text, mode="command")
+                # Use intent system to process voice input
+                result = await shell.process_with_intent(
+                    user_text,
+                    context={"voice_mode": True}
+                )
                 
-                # Check if this looks like an actionable command request
-                is_command_request = any(word in user_text.lower() for word in [
-                    "show", "list", "find", "search", "create", "delete", "run",
-                    "execute", "check", "get", "display", "open", "edit", "install"
-                ])
+                result_type = result.get("type")
                 
-                if is_command_request and suggested_command and not suggested_command.startswith("Error"):
-                    # We have a command to execute
-                    # Clean up markdown backticks from LLM response
-                    clean_suggested_command = suggested_command.strip().strip('`').strip()
-                    assistant_text = f"I'll run the command: {clean_suggested_command}. Should I proceed?"
+                if result_type == "command_approval":
+                    # Command needs approval
+                    command = result.get("content", "")
+                    assistant_text = f"I'll run: {command}. Should I proceed?"
                     needs_approval = True
-                    pending_command = clean_suggested_command
-                else:
-                    # Regular conversation - no command needed
+                    pending_command = command
+                
+                elif result_type == "text":
+                    # Direct text response (greeting, explanation, instructions)
+                    assistant_text = result.get("content", "")
+                    # Keep it short for voice
+                    if len(assistant_text) > 200:
+                        assistant_text = assistant_text[:200] + "..."
                     needs_approval = False
                     pending_command = None
+                
+                elif result_type == "search_results":
+                    # Handle search results
+                    subtype = result.get("subtype")
+                    content = result.get("content", [])
                     
-                    # Build conversation messages
-                    messages = [
-                        {
-                            "role": "system",
-                            "content": "You are Neuralux, a helpful voice-activated AI assistant for Linux. Provide concise, natural responses suitable for text-to-speech. Keep responses under 50 words for voice interaction."
-                        }
-                    ]
-                    
-                    # Add conversation history (last 3 turns)
-                    for i, msg in enumerate(conversation_history[-6:]):
-                        role = "user" if i % 2 == 0 else "assistant"
-                        messages.append({"role": role, "content": msg})
-                    
-                    # Add current user input
-                    messages.append({"role": "user", "content": user_text})
-                    
-                    llm_request = {
-                        "messages": messages,
-                        "max_tokens": 150,
-                        "temperature": 0.7,
-                        "stream": False
-                    }
-                    
-                    llm_response = await shell.message_bus.request(
-                        "ai.llm.request",
-                        llm_request,
-                        timeout=30.0
-                    )
-                    
-                    if "error" in llm_response:
-                        console.print(f"[red]LLM Error: {llm_response['error']}[/red]")
-                        await shell.speak("Sorry, I'm having trouble thinking right now")
-                        if not continuous:
-                            break
-                        continue
-                    
-                    assistant_text = llm_response.get("content", "").strip()
+                    if subtype == "web" and content:
+                        assistant_text = f"I found {len(content)} web results. Should I open the first one?"
+                        needs_approval = True
+                        pending_command = f"xdg-open {content[0].get('url', '')}"
+                    elif subtype == "files" and content:
+                        assistant_text = f"I found {len(content)} files. Should I open the first one?"
+                        needs_approval = True
+                        pending_command = f"xdg-open {content[0].get('file_path', '')}"
+                    else:
+                        assistant_text = "I didn't find any results."
+                        needs_approval = False
+                        pending_command = None
+                
+                elif result_type == "image_generation":
+                    # Image generation
+                    assistant_text = "For image generation, please use the overlay GUI."
+                    needs_approval = False
+                    pending_command = None
+                
+                elif result_type == "error":
+                    assistant_text = result.get("content", "Sorry, I encountered an error.")
+                    needs_approval = False
+                    pending_command = None
+                
+                else:
+                    # Fallback to conversation
+                    assistant_text = "I'm not sure how to help with that."
+                    needs_approval = False
+                    pending_command = None
                 
                 console.print(f"\n[bold blue]Assistant:[/bold blue] {assistant_text}")
                 

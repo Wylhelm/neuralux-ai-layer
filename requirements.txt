@@ -7,6 +7,8 @@ asyncio-nats-client>=0.11.5
 # AI/ML Frameworks
 torch>=2.1.0
 transformers>=4.36.0
+# NOTE: llama-cpp-python will be installed with GPU support if CUDA is detected during install.sh
+# For manual GPU setup: CMAKE_ARGS="-DGGML_CUDA=on" pip install llama-cpp-python --upgrade --force-reinstall --no-cache-dir
 llama-cpp-python>=0.2.0
 sentence-transformers>=2.2.0
 
