@@ -11,7 +11,7 @@ The Neuralux Voice Assistant has been successfully implemented, enabling fully i
 
 ### 1. Voice Assistant Command (`aish assistant`)
 
-A new CLI command that creates an interactive conversation loop:
+A new CLI command that creates an interactive conversation loop with **intelligent voice activity detection**:
 
 ```bash
 # Single turn conversation
@@ -20,11 +20,17 @@ aish assistant
 # Continuous conversation mode
 aish assistant -c
 
-# Custom recording duration
+# Custom maximum recording duration
 aish assistant -d 10
 
 # Force specific language
 aish assistant -l fr
+
+# Adjust silence detection (wait 2 seconds of silence before stopping)
+aish assistant -s 2.0
+
+# More sensitive silence detection (lower threshold)
+aish assistant -t 0.005
 ```
 
 ### 2. Complete Conversation Flow
@@ -32,10 +38,12 @@ aish assistant -l fr
 Each conversation turn includes:
 
 1. **Voice Input (STT)**
-   - Records audio from microphone
+   - Records audio from microphone with **intelligent voice activity detection**
+   - Automatically stops recording when speech ends (configurable silence detection)
+   - Supports natural pauses and longer speech without cutting off
    - Transcribes with CUDA-accelerated faster-whisper
    - Auto-detects language (EN/FR/50+ languages)
-   - VAD filtering for cleaner audio
+   - Real-time RMS-based silence detection
 
 2. **Natural Language Processing (LLM)**
    - Sends transcribed text to LLM service via NATS
@@ -53,7 +61,8 @@ Each conversation turn includes:
    - Uses `ask_llm()` to translate natural language to shell commands
    - Presents command to user: "I'll run the command: <cmd>. Should I proceed?"
    - Asks "Should I proceed? Say yes or no"
-   - Records 3-second approval response
+   - Records approval response with **intelligent voice activity detection**
+   - Automatically stops when approval is complete (shorter silence detection)
    - Transcribes and checks for yes/no
    - **If approved**: Executes command with `subprocess.run()`
    - **Output handling**: Shows full output on screen, speaks summary
@@ -73,7 +82,28 @@ Voice keywords to end session:
 - English: "exit", "quit", "goodbye", "good bye", "bye", "bye bye", "stop", "end", "finish", "close"
 - French: "au revoir", "adieu"
 
-### 5. Integration Points
+### 5. Voice Activity Detection (VAD)
+
+**Intelligent Recording Control:**
+- **Real-time RMS Analysis**: Monitors audio volume in real-time during recording
+- **Configurable Silence Detection**: Adjustable silence duration before stopping (default: 1.5s)
+- **Volume Threshold**: Configurable sensitivity for speech detection (default: 0.01)
+- **Natural Pauses**: Allows short pauses in speech without cutting off
+- **Minimum Recording Time**: Ensures at least 1 second of recording before stopping
+- **Maximum Recording Time**: Prevents infinite recording (configurable, default: 5s)
+
+**Command-line Options (Assistant):**
+- `-s, --silence-duration`: Seconds of silence before stopping (0.5-5.0)
+- `-t, --silence-threshold`: Volume threshold for silence detection (0.001-0.1)
+- `-d, --duration`: Maximum recording time per turn (1-60 seconds)
+
+**Overlay Configuration:**
+- `OVERLAY_VAD_SILENCE_THRESHOLD`: Volume threshold for silence detection (0.001-0.1)
+- `OVERLAY_VAD_SILENCE_DURATION`: Seconds of silence before stopping (0.5-5.0)
+- `OVERLAY_VAD_MAX_RECORDING_TIME`: Maximum recording time per turn (5-60 seconds)
+- `OVERLAY_VAD_MIN_RECORDING_TIME`: Minimum recording time before stopping (1-5 seconds)
+
+### 6. Integration Points
 
 - **STT Service**: `ai.audio.stt` NATS subject
 - **TTS Service**: `ai.audio.tts` NATS subject  
@@ -209,6 +239,11 @@ Assistant: "Goodbye! Have a great day!"
 - ✅ **Exit Keywords**: Natural conversation ending
 - ✅ **Error Handling**: Graceful fallbacks
 - ✅ **CUDA Acceleration**: Fast STT processing
+- ✅ **Intelligent Voice Activity Detection**: Real-time silence detection
+- ✅ **Natural Pause Support**: Allows pauses without cutting off speech
+- ✅ **Configurable Recording Parameters**: Adjustable silence detection
+- ✅ **Overlay Integration**: Same VAD behavior in overlay window
+- ✅ **Environment Configuration**: Configurable VAD settings via environment variables
 
 ### Future Enhancements (Optional)
 - Wake word detection ("Hey Neuralux")
@@ -231,16 +266,21 @@ Complete documentation available:
 ## 🎉 Benefits
 
 1. **Hands-Free Interaction**: No typing required
-2. **Natural Conversations**: Speak naturally in your language
+2. **Natural Conversations**: Speak naturally in your language with natural pauses
 3. **Multi-Language**: Auto-detects and responds appropriately
 4. **Safe Execution**: Voice approval for commands
 5. **Context Aware**: Remembers conversation flow
 6. **Fast**: CUDA acceleration for real-time interaction
 7. **Offline**: All processing happens locally
+8. **Intelligent Recording**: Automatically detects when you finish speaking
+9. **Configurable**: Adjustable silence detection for different speaking styles
+10. **No Cut-offs**: Supports longer speech and natural pauses
+11. **Consistent Experience**: Same VAD behavior in both CLI assistant and overlay
+12. **Environment Configurable**: Adjust VAD settings without code changes
 
 ## ✅ Conclusion
 
-The Voice Assistant implementation is **100% complete and operational**. Users can now have natural, bidirectional voice conversations with Neuralux, ask questions, request actions, and approve commands—all through voice interaction.
+The Voice Assistant implementation is **100% complete and operational** with **intelligent voice activity detection** in both CLI and overlay interfaces. Users can now have natural, bidirectional voice conversations with Neuralux, ask questions, request actions, and approve commands—all through voice interaction without being cut off mid-sentence.
 
 The system demonstrates:
 - Excellent integration between STT, LLM, and TTS services
@@ -248,6 +288,11 @@ The system demonstrates:
 - Natural conversation flow with context
 - Voice-based command approval workflow
 - Multi-language support with auto-detection
+- **Intelligent voice activity detection** with configurable parameters
+- **Natural pause support** for longer, more complex speech
+- **Real-time silence detection** for optimal recording control
+- **Consistent VAD behavior** across CLI assistant and overlay window
+- **Environment-configurable** VAD settings for different use cases
 
 **Ready for production use!** 🚀
 

@@ -2243,19 +2243,67 @@ def overlay(hotkey: bool, tray: bool, toggle: bool, show: bool, hide: bool):
                     channels = 1
                     rate = 16000
                     chunk = 1024
+                    
                     p = pyaudio.PyAudio()
                     stream = p.open(format=audio_format, channels=channels, rate=rate, input=True, frames_per_buffer=chunk)
                     frames = []
-                    # Fixed 5s capture for overlay voice
-                    for _ in range(0, int(rate / chunk * 5)):
+                    
+                    # Voice activity detection parameters for overlay
+                    silence_threshold = config.vad_silence_threshold  # RMS threshold for silence detection
+                    silence_duration = config.vad_silence_duration    # Seconds of silence before stopping
+                    max_recording_time = config.vad_max_recording_time  # Maximum recording time (seconds)
+                    min_recording_time = config.vad_min_recording_time  # Minimum recording time (seconds)
+                    
+                    silence_frames = 0
+                    silence_frame_count = int(rate / chunk * silence_duration)
+                    total_frames = 0
+                    max_frames = int(rate / chunk * max_recording_time)
+                    min_frames = int(rate / chunk * min_recording_time)
+                    
+                    speech_detected = False
+                    
+                    while total_frames < max_frames:
                         data = stream.read(chunk, exception_on_overflow=False)
                         frames.append(data)
-                    stream.stop_stream(); stream.close(); p.terminate()
+                        total_frames += 1
+                        
+                        # Calculate RMS (Root Mean Square) for volume detection
+                        import struct
+                        audio_data = struct.unpack(f'{chunk}h', data)
+                        rms = (sum(x * x for x in audio_data) / len(audio_data)) ** 0.5
+                        
+                        if rms > silence_threshold:
+                            # Speech detected
+                            speech_detected = True
+                            silence_frames = 0
+                        else:
+                            # Silence detected
+                            silence_frames += 1
+                            
+                            # Stop recording if we've had enough silence AND we've recorded minimum time AND we've detected speech
+                            if (silence_frames >= silence_frame_count and 
+                                total_frames >= min_frames and 
+                                speech_detected):
+                                break
+                    
+                    stream.stop_stream()
+                    stream.close()
+                    p.terminate()
+                    
+                    if not speech_detected:
+                        try:
+                            GLib.idle_add(lambda: (app.window and app.window.indicate_recording(False)) or False)
+                        except Exception:
+                            pass
+                        return "No speech detected in recording"
+                    
+                    # Save to temp file
                     with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
                         temp_path = f.name
+                    
                     wf = wave.open(temp_path, "wb")
                     wf.setnchannels(channels)
-                    wf.setsampwidth(pyaudio.PyAudio().get_sample_size(audio_format))
+                    wf.setsampwidth(p.get_sample_size(audio_format))
                     wf.setframerate(rate)
                     wf.writeframes(b"".join(frames))
                     wf.close()
@@ -2883,19 +2931,24 @@ def overlay(hotkey: bool, tray: bool, toggle: bool, show: bool, hide: bool):
 
 @cli.command()
 @click.option("--continuous", "-c", is_flag=True, help="Continuous conversation mode (Ctrl+C to exit)")
-@click.option("--duration", "-d", type=int, default=5, help="Recording duration per turn (seconds)")
+@click.option("--duration", "-d", type=int, default=5, help="Maximum recording duration per turn (seconds)")
 @click.option("--language", "-l", default=None, help="Force specific language (e.g., 'en', 'fr')")
 @click.option("--wake-word", "-w", is_flag=True, help="Require 'neuralux' wake word to activate")
-def assistant(continuous, duration, language, wake_word):
+@click.option("--silence-duration", "-s", type=float, default=1.5, help="Silence duration before stopping recording (seconds)")
+@click.option("--silence-threshold", "-t", type=float, default=0.01, help="Volume threshold for silence detection (0.001-0.1)")
+def assistant(continuous, duration, language, wake_word, silence_duration, silence_threshold):
     """Voice-activated AI assistant.
     
     Interactive conversation with voice input and output.
+    Uses voice activity detection to automatically stop recording when you finish speaking.
     
     Examples:
       aish assistant                  # Single turn conversation
       aish assistant -c               # Continuous conversation
-      aish assistant -d 10            # 10 second recording per turn
+      aish assistant -d 10            # Maximum 10 second recording per turn
       aish assistant -w               # Require wake word
+      aish assistant -s 2.0           # Wait 2 seconds of silence before stopping
+      aish assistant -t 0.005          # More sensitive silence detection
     """
     shell = AIShell()
     
@@ -2906,11 +2959,13 @@ def assistant(continuous, duration, language, wake_word):
         try:
             console.print(Panel.fit(
                 "[bold cyan]🎤 Voice Assistant Activated[/bold cyan]\n\n"
-                f"Recording duration: {duration}s per turn\n"
+                f"Max recording time: {duration}s per turn\n"
+                f"Silence detection: {silence_duration}s silence to stop\n"
+                f"Volume threshold: {silence_threshold}\n"
                 f"Mode: {'Continuous' if continuous else 'Single turn'}\n"
                 f"Language: {language or 'Auto-detect'}\n"
                 f"Wake word: {'Enabled' if wake_word else 'Disabled'}\n\n"
-                "[dim]Speak your command after the beep...[/dim]",
+                "[dim]Speak your command - I'll detect when you're done...[/dim]",
                 title="Neuralux Assistant"
             ))
             
@@ -2930,7 +2985,7 @@ def assistant(continuous, duration, language, wake_word):
                 import wave
                 import tempfile
                 
-                # Record audio
+                # Record audio with voice activity detection
                 audio_format = pyaudio.paInt16
                 channels = 1
                 rate = 16000
@@ -2946,15 +3001,56 @@ def assistant(continuous, duration, language, wake_word):
                 )
                 
                 frames = []
-                console.print(f"[green]Recording for {duration} seconds... Speak now![/green]")
+                console.print(f"[green]Recording... Speak now! (I'll detect when you're done)[/green]")
                 
-                for _ in range(0, int(rate / chunk * duration)):
+                # Voice activity detection parameters
+                silence_threshold = silence_threshold  # RMS threshold for silence detection
+                silence_duration = silence_duration     # Seconds of silence before stopping
+                max_recording_time = duration          # Maximum recording time (seconds)
+                min_recording_time = 1                 # Minimum recording time (seconds)
+                
+                silence_frames = 0
+                silence_frame_count = int(rate / chunk * silence_duration)
+                total_frames = 0
+                max_frames = int(rate / chunk * max_recording_time)
+                min_frames = int(rate / chunk * min_recording_time)
+                
+                speech_detected = False
+                
+                while total_frames < max_frames:
                     data = stream.read(chunk, exception_on_overflow=False)
                     frames.append(data)
+                    total_frames += 1
+                    
+                    # Calculate RMS (Root Mean Square) for volume detection
+                    import struct
+                    audio_data = struct.unpack(f'{chunk}h', data)
+                    rms = (sum(x * x for x in audio_data) / len(audio_data)) ** 0.5
+                    
+                    if rms > silence_threshold:
+                        # Speech detected
+                        speech_detected = True
+                        silence_frames = 0
+                    else:
+                        # Silence detected
+                        silence_frames += 1
+                        
+                        # Stop recording if we've had enough silence AND we've recorded minimum time AND we've detected speech
+                        if (silence_frames >= silence_frame_count and 
+                            total_frames >= min_frames and 
+                            speech_detected):
+                            console.print("[yellow]Speech ended, stopping recording...[/yellow]")
+                            break
                 
                 stream.stop_stream()
                 stream.close()
                 p.terminate()
+                
+                if not speech_detected:
+                    console.print("[yellow]No speech detected in recording[/yellow]")
+                    if not continuous:
+                        break
+                    continue
                 
                 # Save to temp file
                 with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
@@ -3095,8 +3191,8 @@ def assistant(continuous, duration, language, wake_word):
                     console.print("\n[yellow]Waiting for approval...[/yellow]")
                     await shell.speak("Should I proceed? Say yes or no")
                     
-                    # Record approval response
-                    console.print("[green]Recording approval (3 seconds)...[/green]")
+                    # Record approval response with VAD
+                    console.print("[green]Recording approval... Say yes or no[/green]")
                     
                     p = pyaudio.PyAudio()
                     stream = p.open(
@@ -3108,13 +3204,53 @@ def assistant(continuous, duration, language, wake_word):
                     )
                     
                     frames = []
-                    for _ in range(0, int(rate / chunk * 3)):
+                    
+                    # Voice activity detection parameters for approval
+                    approval_silence_threshold = silence_threshold
+                    approval_silence_duration = min(silence_duration, 1.0)  # Shorter silence detection for approval
+                    approval_max_recording_time = min(duration, 10)  # Shorter max time for approval
+                    approval_min_recording_time = 0.5  # Shorter min time for approval
+                    
+                    silence_frames = 0
+                    silence_frame_count = int(rate / chunk * approval_silence_duration)
+                    total_frames = 0
+                    max_frames = int(rate / chunk * approval_max_recording_time)
+                    min_frames = int(rate / chunk * approval_min_recording_time)
+                    
+                    speech_detected = False
+                    
+                    while total_frames < max_frames:
                         data = stream.read(chunk, exception_on_overflow=False)
                         frames.append(data)
+                        total_frames += 1
+                        
+                        # Calculate RMS for volume detection
+                        import struct
+                        audio_data = struct.unpack(f'{chunk}h', data)
+                        rms = (sum(x * x for x in audio_data) / len(audio_data)) ** 0.5
+                        
+                        if rms > approval_silence_threshold:
+                            # Speech detected
+                            speech_detected = True
+                            silence_frames = 0
+                        else:
+                            # Silence detected
+                            silence_frames += 1
+                            
+                            # Stop recording if we've had enough silence AND we've recorded minimum time AND we've detected speech
+                            if (silence_frames >= silence_frame_count and 
+                                total_frames >= min_frames and 
+                                speech_detected):
+                                break
                     
                     stream.stop_stream()
                     stream.close()
                     p.terminate()
+                    
+                    if not speech_detected:
+                        console.print("[yellow]No approval speech detected[/yellow]")
+                        await shell.speak("I didn't hear a response. I'll cancel the command.")
+                        continue
                     
                     with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
                         temp_path = f.name

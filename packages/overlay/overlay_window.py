@@ -104,7 +104,7 @@ class OverlayWindow(Gtk.ApplicationWindow):
         # Mic button
         self._recording = False
         self.mic_button = Gtk.Button(label="🎤")
-        self.mic_button.set_tooltip_text("Record voice (/voice)")
+        self.mic_button.set_tooltip_text("Record voice with intelligent detection (/voice)")
         try:
             self.mic_button.connect("clicked", self._on_mic_clicked)
         except Exception:
@@ -678,7 +678,7 @@ class OverlayWindow(Gtk.ApplicationWindow):
             self._recording = bool(active)
             if self._recording:
                 self.mic_button.set_label("⏺️")
-                self.set_status("Listening...")
+                self.set_status("Listening... (I'll detect when you're done)")
                 self.mic_button.set_sensitive(False)
             else:
                 self.mic_button.set_label("🎤")

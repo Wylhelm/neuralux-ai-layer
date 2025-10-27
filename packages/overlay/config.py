@@ -33,6 +33,12 @@ class OverlayConfig(BaseSettings):
     # Voice features
     tts_enabled_default: bool = False  # Auto TTS playback for overlay results
     
+    # Voice Activity Detection (VAD) settings
+    vad_silence_threshold: float = 0.01  # RMS threshold for silence detection (0.001-0.1)
+    vad_silence_duration: float = 1.5    # Seconds of silence before stopping (0.5-5.0)
+    vad_max_recording_time: int = 15     # Maximum recording time per turn (5-60 seconds)
+    vad_min_recording_time: int = 1      # Minimum recording time before stopping (1-5 seconds)
+    
     class Config:
         env_prefix = "OVERLAY_"
         case_sensitive = False
