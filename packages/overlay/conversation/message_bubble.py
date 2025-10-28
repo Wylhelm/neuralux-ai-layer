@@ -264,11 +264,11 @@ class ActionResultCard(Gtk.Box):
                         from pathlib import Path
                         if Path(image_path).exists():
                             # Get window width to scale appropriately
-                            # Use 400x400 max, but preserve aspect ratio
+                            # Use 200x200 max, but preserve aspect ratio
                             pixbuf = GdkPixbuf.Pixbuf.new_from_file_at_scale(
                                 image_path,
-                                width=400,
-                                height=400,
+                                width=200,
+                                height=200,
                                 preserve_aspect_ratio=True
                             )
                             image_widget = Gtk.Image.new_from_pixbuf(pixbuf)

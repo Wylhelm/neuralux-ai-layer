@@ -91,11 +91,11 @@ class ImageGenerationCard(Gtk.Box):
                 # Load image
                 pixbuf = GdkPixbuf.Pixbuf.new_from_file(image_path)
                 
-                # Scale to fit (larger max height for better visibility)
+                # Scale to fit (smaller thumbnail for compact display)
                 orig_width = pixbuf.get_width()
                 orig_height = pixbuf.get_height()
                 
-                max_height = 720
+                max_height = 360
                 if orig_height > max_height:
                     scale = max_height / orig_height
                     new_width = int(orig_width * scale)
@@ -122,9 +122,13 @@ class ImageGenerationCard(Gtk.Box):
                 gesture = Gtk.GestureClick.new()
                 def _open_full_image(_gesture, n_press, x, y):
                     try:
+                        # Load original full-size image for preview
+                        original_pixbuf = GdkPixbuf.Pixbuf.new_from_file(image_path)
+                        original_texture = Gdk.Texture.new_for_pixbuf(original_pixbuf)
+                        
                         win = Gtk.Window()
                         win.set_title("Image Preview")
-                        win.set_default_size(max(1200, pixbuf.get_width()+24), max(900, pixbuf.get_height()+24))
+                        win.set_default_size(max(1200, original_pixbuf.get_width()+24), max(900, original_pixbuf.get_height()+24))
                         win.set_modal(True)
                         try:
                             win.maximize()
@@ -136,7 +140,7 @@ class ImageGenerationCard(Gtk.Box):
                         sc.set_hexpand(True)
                         sc.set_vexpand(True)
                         img = Gtk.Picture()
-                        img.set_paintable(texture)
+                        img.set_paintable(original_texture)
                         img.set_can_shrink(True)
                         img.set_halign(Gtk.Align.CENTER)
                         img.set_valign(Gtk.Align.CENTER)
