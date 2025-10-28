@@ -91,11 +91,11 @@ class ImageGenerationCard(Gtk.Box):
                 # Load image
                 pixbuf = GdkPixbuf.Pixbuf.new_from_file(image_path)
                 
-                # Scale to fit (max 400px height)
+                # Scale to fit (larger max height for better visibility)
                 orig_width = pixbuf.get_width()
                 orig_height = pixbuf.get_height()
                 
-                max_height = 400
+                max_height = 720
                 if orig_height > max_height:
                     scale = max_height / orig_height
                     new_width = int(orig_width * scale)
@@ -116,6 +116,56 @@ class ImageGenerationCard(Gtk.Box):
                 picture.set_can_shrink(False)
                 picture.set_margin_top(8)
                 picture.set_margin_bottom(8)
+                picture.add_css_class("image-preview")
+                
+                # Click-to-enlarge: open in separate resizable window
+                gesture = Gtk.GestureClick.new()
+                def _open_full_image(_gesture, n_press, x, y):
+                    try:
+                        win = Gtk.Window()
+                        win.set_title("Image Preview")
+                        win.set_default_size(max(1200, pixbuf.get_width()+24), max(900, pixbuf.get_height()+24))
+                        win.set_modal(True)
+                        try:
+                            win.maximize()
+                        except Exception:
+                            pass
+
+                        sc = Gtk.ScrolledWindow()
+                        sc.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
+                        sc.set_hexpand(True)
+                        sc.set_vexpand(True)
+                        img = Gtk.Picture()
+                        img.set_paintable(texture)
+                        img.set_can_shrink(True)
+                        img.set_halign(Gtk.Align.CENTER)
+                        img.set_valign(Gtk.Align.CENTER)
+                        sc.set_child(img)
+
+                        v = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+                        v.set_margin_top(6)
+                        v.set_margin_bottom(6)
+                        v.set_margin_start(6)
+                        v.set_margin_end(6)
+                        v.append(sc)
+
+                        close_btn = Gtk.Button(label="✕ Close")
+                        close_btn.set_halign(Gtk.Align.END)
+                        close_btn.connect("clicked", lambda *_: win.close())
+                        v.append(close_btn)
+
+                        win.set_child(v)
+                        root = self.get_root()
+                        if root and hasattr(win, 'set_transient_for'):
+                            try:
+                                win.set_transient_for(root)
+                            except Exception:
+                                pass
+                        win.present()
+                    except Exception as e:
+                        logger.error(f"Failed to open full image: {e}")
+                gesture.connect("released", _open_full_image)
+                picture.add_controller(gesture)
                 card_box.append(picture)
                 
                 # Store texture for clipboard

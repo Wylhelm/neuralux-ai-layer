@@ -270,12 +270,19 @@ class ConversationHandler:
             response_message = f"Partially completed: {success_count}/{len(actions)} actions succeeded."
             response_type = "partial_success"
         else:
-            # Build detailed success message
-            if len(executed_actions) == 1:
-                action_desc = executed_actions[0].get("description", "Action")
-                response_message = f"{action_desc} completed successfully."
+            # For LLM_GENERATE actions, use the actual generated content as the message
+            if len(executed_actions) == 1 and executed_actions[0].get("action_type") == "llm_generate":
+                # Get the actual LLM response content
+                response_message = executed_actions[0].get("details", {}).get("content", "")
+                if not response_message:
+                    response_message = self.context.get_variable("last_generated_text", "Response generated successfully.")
             else:
-                response_message = f"Completed {len(executed_actions)} actions successfully."
+                # Build detailed success message for other actions
+                if len(executed_actions) == 1:
+                    action_desc = executed_actions[0].get("description", "Action")
+                    response_message = f"{action_desc} completed successfully."
+                else:
+                    response_message = f"Completed {len(executed_actions)} actions successfully."
             
             response_type = "success"
         

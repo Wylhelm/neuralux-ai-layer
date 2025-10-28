@@ -38,6 +38,11 @@ class OverlayConfig(BaseSettings):
     vad_silence_duration: float = 1.5    # Seconds of silence before stopping (0.5-5.0)
     vad_max_recording_time: int = 15     # Maximum recording time per turn (5-60 seconds)
     vad_min_recording_time: int = 1      # Minimum recording time before stopping (1-5 seconds)
+    vad_dynamic_factor: float = 1.8      # Multiplier for dynamic threshold (noise_rms * factor)
+    vad_min_rms: int = 120               # Minimum RMS floor when using dynamic threshold
+    
+    # Speech-to-Text language
+    stt_language: str = "en"             # Language for speech recognition (en, fr, auto, etc.)
     
     class Config:
         env_prefix = "OVERLAY_"

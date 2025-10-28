@@ -94,13 +94,12 @@ class DocumentQueryCard(Gtk.Box):
         if documents:
             scrolled = Gtk.ScrolledWindow()
             scrolled.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
-            scrolled.set_max_content_height(250)
             scrolled.set_propagate_natural_height(True)
             scrolled.set_margin_top(8)
             
             docs_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
             
-            for i, doc in enumerate(documents[:10], 1):  # Limit to top 10
+            for i, doc in enumerate(documents[:20], 1):  # Show up to top 20
                 doc_widget = self._create_document_item(i, doc)
                 docs_box.append(doc_widget)
             
@@ -111,10 +110,19 @@ class DocumentQueryCard(Gtk.Box):
             if len(documents) > 0:
                 tip_label = Gtk.Label()
                 tip_label.set_markup(
-                    '<span alpha="60%">💡 Click a document to open it</span>'
+                    '<span alpha="60%">💡 Click a document to open it, or use the buttons</span>'
                 )
                 tip_label.set_margin_top(6)
                 card_box.append(tip_label)
+
+            # Expand button
+            btn_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+            btn_row.set_margin_top(6)
+            expand_btn = Gtk.Button(label="⛶ Expand")
+            expand_btn.set_tooltip_text("Open full document results")
+            expand_btn.connect("clicked", lambda *_: self._open_full_results(documents))
+            btn_row.append(expand_btn)
+            card_box.append(btn_row)
         else:
             # No results
             no_results_label = Gtk.Label(label="No documents found")
@@ -134,6 +142,13 @@ class DocumentQueryCard(Gtk.Box):
         doc_box.set_margin_top(4)
         doc_box.set_margin_bottom(4)
         
+        # Make the box clickable
+        path = doc.get("path", "")
+        gesture = Gtk.GestureClick.new()
+        gesture.connect("released", lambda *_: self._open_document(path))
+        doc_box.add_controller(gesture)
+        doc_box.add_css_class("document-item-clickable")
+
         # Header row
         header_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
         
@@ -143,7 +158,6 @@ class DocumentQueryCard(Gtk.Box):
         header_row.append(index_label)
         
         # Path/name
-        path = doc.get("path", "")
         name_label = Gtk.Label()
         name_label.set_markup(f"<b>{path}</b>")
         name_label.set_halign(Gtk.Align.START)
@@ -159,12 +173,6 @@ class DocumentQueryCard(Gtk.Box):
             score_label.set_tooltip_text("Relevance score")
             header_row.append(score_label)
         
-        # Open button
-        open_btn = Gtk.Button(label="Open")
-        open_btn.add_css_class("doc-open-btn")
-        open_btn.connect("clicked", lambda _: self._open_document(path))
-        header_row.append(open_btn)
-        
         doc_box.append(header_row)
         
         # Preview/snippet (if available)
@@ -177,6 +185,22 @@ class DocumentQueryCard(Gtk.Box):
             preview_label.set_margin_start(20)  # Indent
             preview_label.add_css_class("doc-preview")
             doc_box.append(preview_label)
+
+        # Action buttons row
+        btn_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        btn_row.set_margin_top(4)
+
+        open_btn = Gtk.Button(label="📂 Open")
+        open_btn.set_tooltip_text("Open document")
+        open_btn.connect("clicked", lambda *_: self._open_document(path))
+        btn_row.append(open_btn)
+
+        copy_btn = Gtk.Button(label="📋 Copy Path")
+        copy_btn.set_tooltip_text("Copy document path to clipboard")
+        copy_btn.connect("clicked", lambda *_: self._copy_to_clipboard(path))
+        btn_row.append(copy_btn)
+
+        doc_box.append(btn_row)
         
         return doc_box
     
@@ -188,4 +212,60 @@ class DocumentQueryCard(Gtk.Box):
             logger.info(f"Opening document: {path}")
         except Exception as e:
             logger.error(f"Failed to open document: {e}")
+
+    def _copy_to_clipboard(self, text: str):
+        """Copy text to clipboard."""
+        try:
+            from gi.repository import Gdk
+            display = Gdk.Display.get_default()
+            clipboard = display.get_clipboard()
+            clipboard.set(text)
+            logger.info("Path copied to clipboard")
+        except Exception as e:
+            logger.error(f"Failed to copy to clipboard: {e}")
+
+    def _open_full_results(self, documents: List[Dict[str, Any]]):
+        """Open a large, scrollable window with all document results."""
+        try:
+            win = Gtk.Window()
+            win.set_title("Document Results")
+            win.set_default_size(1100, 800)
+            try:
+                win.maximize()
+            except Exception:
+                pass
+
+            sc = Gtk.ScrolledWindow()
+            sc.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
+            sc.set_hexpand(True)
+            sc.set_vexpand(True)
+            box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+
+            for i, doc in enumerate(documents, 1):
+                box.append(self._create_document_item(i, doc))
+
+            sc.set_child(box)
+
+            vb = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+            vb.set_margin_top(8)
+            vb.set_margin_bottom(8)
+            vb.set_margin_start(8)
+            vb.set_margin_end(8)
+            vb.append(sc)
+
+            close_btn = Gtk.Button(label="✕ Close")
+            close_btn.set_halign(Gtk.Align.END)
+            close_btn.connect("clicked", lambda *_: win.close())
+            vb.append(close_btn)
+
+            win.set_child(vb)
+            root = self.get_root()
+            if root and hasattr(win, 'set_transient_for'):
+                try:
+                    win.set_transient_for(root)
+                except Exception:
+                    pass
+            win.present()
+        except Exception as e:
+            logger.error(f"Failed to open full document results: {e}")
 

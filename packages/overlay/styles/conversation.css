@@ -81,6 +81,29 @@ scrolledwindow {
     max-height: 500px;
 }
 
+/* Larger scroller for command output specifically */
+.command-output-scroller {
+    min-height: 220px;
+    max-height: 720px;
+}
+
+/* Command output text view - dark theme */
+.command-output {
+    background: #262737; /* dark card tone */
+    color: #cdd6f4;
+    border: 1px solid #45475a;
+    border-radius: 4px;
+    padding: 6px;
+}
+
+.command-output text selection {
+    background-color: rgba(137, 180, 250, 0.35); /* #89b4fa with alpha */
+}
+
+.command-output text {
+    color: #cdd6f4;
+}
+
 scrolledwindow textview {
     padding: 4px;
 }

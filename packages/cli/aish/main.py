@@ -2190,7 +2190,7 @@ def overlay(hotkey: bool, tray: bool, toggle: bool, show: bool, hide: bool):
             if t in ("/voice", "/listen"):
                 # Single-turn voice capture and STT → LLM
                 try:
-                    import pyaudio, wave, tempfile
+                    import pyaudio, wave, tempfile, struct
                     audio_format = pyaudio.paInt16
                     channels = 1
                     rate = 16000
@@ -2201,8 +2201,8 @@ def overlay(hotkey: bool, tray: bool, toggle: bool, show: bool, hide: bool):
                     frames = []
                     
                     # Voice activity detection parameters for overlay
-                    silence_threshold = config.vad_silence_threshold  # RMS threshold for silence detection
-                    silence_duration = config.vad_silence_duration    # Seconds of silence before stopping
+                    cfg_threshold = config.vad_silence_threshold  # RMS threshold or dynamic hint (<1 means dynamic)
+                    silence_duration = config.vad_silence_duration  # Use full configured silence duration
                     max_recording_time = config.vad_max_recording_time  # Maximum recording time (seconds)
                     min_recording_time = config.vad_min_recording_time  # Minimum recording time (seconds)
                     
@@ -2213,6 +2213,28 @@ def overlay(hotkey: bool, tray: bool, toggle: bool, show: bool, hide: bool):
                     min_frames = int(rate / chunk * min_recording_time)
                     
                     speech_detected = False
+
+                    # Dynamic noise calibration (~0.4s)
+                    try:
+                        calibration_frames = max(1, int(rate / chunk * 0.4))
+                        noise_accum = 0.0
+                        noise_count = 0
+                        for _ in range(calibration_frames):
+                            data0 = stream.read(chunk, exception_on_overflow=False)
+                            frames.append(data0)
+                            total_frames += 1
+                            audio_cal = struct.unpack(f"{chunk}h", data0)
+                            rms0 = (sum(x * x for x in audio_cal) / len(audio_cal)) ** 0.5
+                            noise_accum += rms0
+                            noise_count += 1
+                        noise_rms = (noise_accum / max(1, noise_count)) if noise_count else 0.0
+                        # Allow env overrides if NeuraluxConfig lacks these fields
+                        import os as _os
+                        dyn_factor = getattr(config, 'vad_dynamic_factor', float(_os.getenv('OVERLAY_VAD_DYNAMIC_FACTOR', '1.8')))
+                        min_rms = getattr(config, 'vad_min_rms', int(_os.getenv('OVERLAY_VAD_MIN_RMS', '120')))
+                        silence_threshold = max(int(noise_rms * dyn_factor), min_rms) if cfg_threshold < 1.0 else cfg_threshold
+                    except Exception:
+                        silence_threshold = int(getattr(config, 'vad_min_rms', 120))
                     
                     while total_frames < max_frames:
                         data = stream.read(chunk, exception_on_overflow=False)
@@ -2220,7 +2242,6 @@ def overlay(hotkey: bool, tray: bool, toggle: bool, show: bool, hide: bool):
                         total_frames += 1
                         
                         # Calculate RMS (Root Mean Square) for volume detection
-                        import struct
                         audio_data = struct.unpack(f'{chunk}h', data)
                         rms = (sum(x * x for x in audio_data) / len(audio_data)) ** 0.5
                         
@@ -2240,14 +2261,18 @@ def overlay(hotkey: bool, tray: bool, toggle: bool, show: bool, hide: bool):
                     
                     stream.stop_stream()
                     stream.close()
-                    p.terminate()
                     
                     if not speech_detected:
+                        p.terminate()
                         try:
                             GLib.idle_add(lambda: (app.window and app.window.indicate_recording(False)) or False)
                         except Exception:
                             pass
                         return "No speech detected in recording"
+                    
+                    # Get sample size BEFORE terminating PyAudio
+                    sample_width = p.get_sample_size(audio_format)
+                    p.terminate()
                     
                     # Save to temp file
                     with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
@@ -2255,7 +2280,7 @@ def overlay(hotkey: bool, tray: bool, toggle: bool, show: bool, hide: bool):
                     
                     wf = wave.open(temp_path, "wb")
                     wf.setnchannels(channels)
-                    wf.setsampwidth(p.get_sample_size(audio_format))
+                    wf.setsampwidth(sample_width)
                     wf.setframerate(rate)
                     wf.writeframes(b"".join(frames))
                     wf.close()
@@ -2272,11 +2297,12 @@ def overlay(hotkey: bool, tray: bool, toggle: bool, show: bool, hide: bool):
                 except Exception:
                     pass
 
-                # STT request
+                # STT request (respect overlay language config or use "en" as default)
                 try:
+                    language = getattr(config, "stt_language", "en")
                     stt_resp = await shell.message_bus.request(
                         "ai.audio.stt",
-                        {"audio_path": temp_path, "vad_filter": True, "language": "auto"},
+                        {"audio_path": temp_path, "vad_filter": True, "language": language},
                         timeout=45.0,
                     )
                 finally:

@@ -10,6 +10,13 @@ from datetime import datetime
 import structlog
 
 from .message_bubble import MessageBubble, ActionResultCard
+from .result_cards import (
+    CommandOutputCard,
+    DocumentQueryCard,
+    WebSearchCard,
+    ImageGenerationCard,
+    LLMGenerationCard,
+)
 
 logger = structlog.get_logger(__name__)
 
@@ -145,8 +152,67 @@ class ConversationHistoryWidget(Gtk.Box):
         """
         self._remove_empty_state()
         
-        card = ActionResultCard(action_result)
-        self.messages_box.append(card)
+        # Prefer specialized cards when possible
+        try:
+            action_type = (action_result.get("action_type") or "").lower()
+            details = action_result.get("details", {}) or {}
+            widget = None
+
+            if action_type == "command_execute":
+                # Map to command card schema
+                widget = CommandOutputCard({
+                    "command": details.get("command", ""),
+                    "exit_code": details.get("returncode", 0),
+                    "stdout": details.get("stdout", ""),
+                    "stderr": details.get("stderr", ""),
+                })
+            elif action_type == "document_query":
+                # Map filesystem search results to document card schema
+                raw_docs = details.get("results", [])
+                docs = []
+                for r in raw_docs:
+                    # Support both service schema and any passthrough
+                    path = r.get("file_path") or r.get("path") or r.get("filename") or ""
+                    snippet = r.get("snippet") or r.get("preview") or ""
+                    score = r.get("score") or r.get("relevance") or 0
+                    docs.append({
+                        "path": path,
+                        "preview": snippet,
+                        "relevance": float(score) if isinstance(score, (int, float)) else 0,
+                    })
+                widget = DocumentQueryCard({
+                    "query": details.get("query", ""),
+                    "documents": docs,
+                })
+            elif action_type == "web_search":
+                results = details.get("results", [])
+                widget = WebSearchCard({
+                    "query": details.get("query", ""),
+                    "results": results,
+                })
+            elif action_type == "image_generate":
+                widget = ImageGenerationCard({
+                    "image_path": details.get("image_path", ""),
+                    "prompt": details.get("prompt", ""),
+                    "model": details.get("model", ""),
+                    "width": details.get("width", 0),
+                    "height": details.get("height", 0),
+                    "generation_time": details.get("generation_time", 0),
+                })
+            elif action_type == "llm_generate":
+                widget = LLMGenerationCard({
+                    "text": details.get("content", ""),
+                    "tokens": details.get("tokens", 0),
+                    "generation_time": details.get("generation_time", 0),
+                })
+            
+            if widget is None:
+                widget = ActionResultCard(action_result)
+        except Exception as e:
+            logger.error("Failed to render specialized card", error=str(e))
+            widget = ActionResultCard(action_result)
+
+        self.messages_box.append(widget)
         
         # Auto-scroll to bottom
         self._scroll_to_bottom()

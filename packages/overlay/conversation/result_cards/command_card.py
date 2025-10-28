@@ -115,8 +115,8 @@ class CommandOutputCard(Gtk.Box):
             # Create scrolled window for output
             scrolled = Gtk.ScrolledWindow()
             scrolled.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
-            scrolled.set_max_content_height(200)
             scrolled.set_propagate_natural_height(True)
+            scrolled.add_css_class("command-output-scroller")
             
             # Output text
             output_text = Gtk.TextView()
@@ -146,6 +146,12 @@ class CommandOutputCard(Gtk.Box):
             copy_btn.set_tooltip_text("Copy output to clipboard")
             copy_btn.connect("clicked", lambda _: self._copy_output(stdout + stderr))
             btn_box.append(copy_btn)
+
+            # Expand button
+            expand_btn = Gtk.Button(label="⛶ Expand")
+            expand_btn.set_tooltip_text("Open full output in a window")
+            expand_btn.connect("clicked", lambda _: self._show_full_output(stdout, stderr))
+            btn_box.append(expand_btn)
             
             output_box.append(btn_box)
             card_box.append(output_box)
@@ -164,4 +170,74 @@ class CommandOutputCard(Gtk.Box):
             logger.info("Output copied to clipboard")
         except Exception as e:
             logger.error("Failed to copy output", error=str(e))
+
+    def _show_full_output(self, stdout: str, stderr: str):
+        """Show the full command output in a resizable window."""
+        try:
+            # Build text content
+            content = stdout or ""
+            if stderr:
+                if content:
+                    content += "\n--- stderr ---\n"
+                content += stderr
+
+            # Create window
+            window = Gtk.Window()
+            window.set_title("Command Output")
+            window.set_default_size(1100, 800)
+            window.set_modal(True)
+            try:
+                window.maximize()
+            except Exception:
+                pass
+
+            root = self.get_root()
+            if root and hasattr(window, 'set_transient_for'):
+                try:
+                    window.set_transient_for(root)
+                except Exception:
+                    pass
+
+            # Scrolled text view
+            scrolled = Gtk.ScrolledWindow()
+            scrolled.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
+            scrolled.set_hexpand(True)
+            scrolled.set_vexpand(True)
+            text_view = Gtk.TextView()
+            text_view.set_editable(False)
+            text_view.set_wrap_mode(Gtk.WrapMode.WORD_CHAR)
+            text_view.set_monospace(True)
+            text_view.add_css_class("command-output")
+            buffer = text_view.get_buffer()
+            buffer.insert(buffer.get_end_iter(), content, -1)
+            scrolled.set_child(text_view)
+
+            # Buttons row
+            btn_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+            btn_box.set_margin_top(6)
+            btn_box.set_margin_bottom(6)
+            btn_box.set_margin_start(6)
+            btn_box.set_margin_end(6)
+
+            copy_btn = Gtk.Button(label="📋 Copy")
+            copy_btn.connect("clicked", lambda *_: self._copy_output(content))
+            btn_box.append(copy_btn)
+
+            close_btn = Gtk.Button(label="✕ Close")
+            close_btn.connect("clicked", lambda *_: window.close())
+            btn_box.append(close_btn)
+
+            # Container
+            vbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+            vbox.set_margin_top(8)
+            vbox.set_margin_bottom(8)
+            vbox.set_margin_start(8)
+            vbox.set_margin_end(8)
+            vbox.append(scrolled)
+            vbox.append(btn_box)
+
+            window.set_child(vbox)
+            window.present()
+        except Exception as e:
+            logger.error("Failed to show full output", error=str(e))
 

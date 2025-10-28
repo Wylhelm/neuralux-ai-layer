@@ -94,7 +94,7 @@ class WebSearchCard(Gtk.Box):
         if results:
             scrolled = Gtk.ScrolledWindow()
             scrolled.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
-            scrolled.set_max_content_height(300)
+            scrolled.set_max_content_height(360)
             scrolled.set_propagate_natural_height(True)
             scrolled.set_margin_top(8)
             
@@ -115,6 +115,15 @@ class WebSearchCard(Gtk.Box):
                 )
                 tip_label.set_margin_top(6)
                 card_box.append(tip_label)
+
+            # Expand button
+            btn_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+            btn_row.set_margin_top(6)
+            expand_btn = Gtk.Button(label="⛶ Expand")
+            expand_btn.set_tooltip_text("Open results in a larger window")
+            expand_btn.connect("clicked", lambda *_: self._open_full_results(results))
+            btn_row.append(expand_btn)
+            card_box.append(btn_row)
         else:
             # No results
             no_results_label = Gtk.Label(label="No results found")
@@ -198,6 +207,51 @@ class WebSearchCard(Gtk.Box):
         
         return result_box
     
+    def _open_full_results(self, results: List[Dict[str, Any]]):
+        """Open a large window with scrollable web results."""
+        try:
+            win = Gtk.Window()
+            win.set_title("Web Search Results")
+            win.set_default_size(1100, 800)
+            try:
+                win.maximize()
+            except Exception:
+                pass
+
+            sc = Gtk.ScrolledWindow()
+            sc.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
+            sc.set_hexpand(True)
+            sc.set_vexpand(True)
+            box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+
+            for i, r in enumerate(results, 1):
+                box.append(self._create_result_item(i, r))
+
+            sc.set_child(box)
+
+            vb = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+            vb.set_margin_top(8)
+            vb.set_margin_bottom(8)
+            vb.set_margin_start(8)
+            vb.set_margin_end(8)
+            vb.append(sc)
+
+            close_btn = Gtk.Button(label="✕ Close")
+            close_btn.set_halign(Gtk.Align.END)
+            close_btn.connect("clicked", lambda *_: win.close())
+            vb.append(close_btn)
+
+            win.set_child(vb)
+            root = self.get_root()
+            if root and hasattr(win, 'set_transient_for'):
+                try:
+                    win.set_transient_for(root)
+                except Exception:
+                    pass
+            win.present()
+        except Exception as e:
+            logger.error(f"Failed to open full web results: {e}")
+
     def _open_url(self, url: str):
         """Open URL in browser."""
         try:

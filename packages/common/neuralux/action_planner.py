@@ -37,20 +37,7 @@ class ActionPlanner:
         """
         logger.info("planning_actions", input=user_input, session=context.session_id)
         
-        # Check if this is a simple conversational input (no actions needed)
-        lower_input = user_input.lower().strip()
-        conversational_patterns = [
-            r'^(hi|hello|hey|greetings|good morning|good afternoon|good evening|bonjour|salut|hola|ciao)(!|\?|\.)*$',
-            r'^how are you(\?|!)*$',
-            r'^(thanks|thank you|ty|merci|gracias)(!|\.)*$',
-            r'^(ok|okay|cool|nice|great)(!|\.)*$',
-            r'^(bye|goodbye|see you|cya|au revoir|adios)(!|\.)*$',
-        ]
-        
-        for pattern in conversational_patterns:
-            if re.match(pattern, lower_input):
-                # No actions needed - just conversational response
-                return [], f"Hello! I'm here to help. What would you like to do?"
+        # Let the LLM handle conversational inputs - it's more intelligent than patterns!
         
         # Check for simple reference patterns BEFORE LLM (to avoid misinterpretation)
         # These are common cases where users reference previous results by number
@@ -58,26 +45,28 @@ class ActionPlanner:
         if quick_actions:
             return quick_actions, quick_explanation
         
-        # Fast-path: informational Q&A should bypass planner LLM to reduce latency
-        lower_input_for_intent = lower_input
+        # Fast-path: informational Q&A and conversational inputs bypass planner LLM
+        lower_input_for_intent = user_input.lower()
         if self._is_informational_query(lower_input_for_intent):
             params = {
                 "prompt": user_input,
                 "use_history": True,
                 "system_prompt": (
-                    "You are a helpful assistant inside a desktop overlay. "
-                    "Answer the user's question directly, accurately, and concisely. "
-                    "Do not propose or execute system actions unless explicitly asked."
+                    "You are Neuralux, a friendly and helpful AI assistant. "
+                    "Respond naturally and conversationally. "
+                    "For greetings, be warm and welcoming. "
+                    "For questions, answer directly, accurately, and concisely. "
+                    "Be personable and helpful. Keep responses brief but complete."
                 ),
-                "temperature": 0.2,
-                "max_tokens": 256,
+                "temperature": 0.7,  # More natural for conversation
+                "max_tokens": 300,
             }
             return [Action(
                 action_type=ActionType.LLM_GENERATE,
                 params=params,
-                description="Answer user question",
+                description="Respond to user",
                 needs_approval=False,
-            )], "Answering your question"
+            )], "Responding to your message"
         
         # Check if input needs reference resolution
         if ReferenceResolver.needs_resolution(user_input):
@@ -398,33 +387,47 @@ Now plan the actions for the user's request."""
         return prompt
 
     def _is_informational_query(self, lower_input: str) -> bool:
-        """Heuristic to detect pure informational Q&A to skip planner LLM.
+        """Heuristic to detect pure informational Q&A and conversational inputs.
         
-        This catches common question forms and non-imperative requests.
+        This catches questions, greetings, and non-imperative conversational requests.
         """
         # Question mark is a strong indicator
         if "?" in lower_input:
             return True
+        
+        # Greetings and conversational phrases (let LLM handle naturally)
+        conversational_words = (
+            "hello", "hi", "hey", "good morning", "good afternoon", "good evening",
+            "thanks", "thank you", "bye", "goodbye", "how are you", "what's up",
+            "greetings", "howdy", "bonjour", "hola", "ciao", "salut",
+        )
+        if any(phrase in lower_input for phrase in conversational_words):
+            return True
+        
         # Common interrogatives and informational verbs
         starters = (
             "what", "who", "when", "where", "why", "how",
             "explain", "tell me", "summarize", "summary of",
             "define", "describe", "compare", "difference between",
             "translate", "meaning of", "calculate", "compute",
+            "can you", "could you", "would you", "please",
         )
         if any(lower_input.startswith(s) for s in starters):
             return True
+        
         # Avoid matching obvious imperative system intents
         imperative_keywords = (
             "open", "create", "write", "save", "move", "delete",
-            "list", "search", "run", "execute", "install",
+            "list files", "search files", "run", "execute", "install",
             "generate image", "ocr", "web search",
         )
         if any(k in lower_input for k in imperative_keywords):
             return False
+        
         # Short, declarative informational prompts
         if len(lower_input.split()) >= 3 and any(w in lower_input for w in ("info", "information", "overview", "guide")):
             return True
+        
         return False
     
     def _fallback_plan_actions(
@@ -442,8 +445,35 @@ Now plan the actions for the user's request."""
         
         lower_input = user_input.lower()
         
-        # Pattern: Create folder/directory
-        if "create" in lower_input and ("folder" in lower_input or "directory" in lower_input or "dir" in lower_input):
+        # Pattern: Create file (stronger detection, before folder detection)
+        if "create" in lower_input and "file" in lower_input:
+            filename = None
+            # 1) "create a NAME file" or "create NAME file"
+            m1 = re.search(r"create\s+(?:a\s+|an\s+)?([^\s]+)\s+file", lower_input)
+            # 2) "create a file named NAME" / "create file called NAME"
+            m2 = re.search(r"create\s+(?:a\s+)?file\s+(?:named|called)\s+([^\s]+)", lower_input)
+            # 3) "create file NAME"
+            m3 = re.search(r"create\s+file\s+([^\s]+)", lower_input)
+            # 4) fallback to previous "named NAME"
+            m4 = re.search(r"named?\s+([^\s]+)", lower_input)
+            for m in (m1, m2, m3, m4):
+                if m:
+                    filename = m.group(1)
+                    break
+            if filename:
+                # If it mistakenly looks like a directory intent with trailing '/', normalize
+                filename = filename.rstrip('/')
+                command = f"touch {filename}"
+                actions.append(Action(
+                    action_type=ActionType.COMMAND_EXECUTE,
+                    params={"command": command},
+                    description=f"Execute: {command}",
+                    needs_approval=True,
+                ))
+                explanation = f"Creating file {filename}"
+        
+        # Pattern: Create folder/directory (after file detection to avoid misclassification)
+        elif "create" in lower_input and ("folder" in lower_input or "directory" in lower_input or "dir" in lower_input):
             # Extract folder name
             match = re.search(r"named?\s+([^\s]+)", lower_input)
             if match:
@@ -460,21 +490,6 @@ Now plan the actions for the user's request."""
                     needs_approval=True,
                 ))
                 explanation = f"Creating directory {foldername}"
-        
-        # Pattern: Create file
-        elif "create" in lower_input and "file" in lower_input:
-            # Extract filename
-            match = re.search(r"named?\s+([^\s]+)", lower_input)
-            if match:
-                filename = match.group(1)
-                command = f"touch {filename}"
-                actions.append(Action(
-                    action_type=ActionType.COMMAND_EXECUTE,
-                    params={"command": command},
-                    description=f"Execute: {command}",
-                    needs_approval=True,
-                ))
-                explanation = f"Creating file {filename}"
         
         # Pattern: Write to file
         elif "write" in lower_input and ("to" in lower_input or "in" in lower_input):
@@ -494,8 +509,18 @@ Now plan the actions for the user's request."""
                     needs_approval=False,
                 ))
             
-            # Determine target file
+            # Determine target file; handle pronoun "in it" by using last_created_file, and detect explicit filenames with extensions
             file_path = resolved_values.get("file_path") or context.get_variable("last_created_file", "output.txt")
+            # If an explicit filename is present after "in" or "to", prefer it
+            explicit = None
+            m = re.search(r"(?:in|to)\s+([^\s]+)\b", lower_input)
+            if m:
+                candidate = m.group(1).rstrip('/')
+                # Treat as a file if it has an extension
+                if "." in candidate and not candidate.endswith('.'):
+                    explicit = candidate
+            if explicit:
+                file_path = explicit
             
             # Use cat > to write generated content
             command = f"cat > {file_path}"

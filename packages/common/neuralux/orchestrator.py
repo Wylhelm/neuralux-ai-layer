@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Callable
 from enum import Enum
+import shlex
 
 import structlog
 
@@ -191,6 +192,73 @@ class ActionOrchestrator:
             if results:
                 context.set_variable("last_search_results", results)
                 context.set_variable("last_search_query", details.get("query", ""))
+        
+        elif action.action_type == ActionType.COMMAND_EXECUTE:
+            # Try to update context based on common shell operations
+            command = details.get("command", "") or ""
+            if not command:
+                return
+            try:
+                # Basic tokenization (handles quotes)
+                tokens = shlex.split(command)
+            except Exception:
+                tokens = command.split()
+            if not tokens:
+                return
+            cmd = tokens[0]
+            args = tokens[1:]
+            
+            def _expand(p: str) -> str:
+                try:
+                    return str(PathExpander.expand(p, context.working_directory))
+                except Exception:
+                    return p
+            
+            # Handle 'cd DIR' - update working directory
+            if cmd == "cd" and args:
+                new_dir = _expand(args[0])
+                context.set_variable("working_directory", new_dir)
+                context.working_directory = new_dir
+                return
+            
+            # Handle 'mkdir [-p] DIR'
+            if cmd == "mkdir":
+                # Collect non-option args as directories
+                candidate_dirs = [a for a in args if not a.startswith("-")]
+                if candidate_dirs:
+                    last_dir = _expand(candidate_dirs[-1])
+                    # Track last created directory and list
+                    context.set_variable("last_created_dir", last_dir)
+                    created_dirs = context.get_variable("created_dirs", []) or []
+                    if isinstance(created_dirs, list):
+                        created_dirs.append(last_dir)
+                        context.set_variable("created_dirs", created_dirs)
+                    # Adopt as new working directory for fluid chaining
+                    context.set_variable("working_directory", last_dir)
+                    context.working_directory = last_dir
+                return
+            
+            # Detect redirection '>' target e.g., 'cat > file.txt'
+            import re as _re
+            redir_match = _re.search(r">\s*([^\s]+)\s*$", command)
+            target_path = None
+            if redir_match:
+                target_path = redir_match.group(1)
+            # Handle 'touch FILE' or redirection targets as last created file
+            if cmd == "touch" and args:
+                target_path = args[-1]
+            if target_path:
+                abs_path = _expand(target_path)
+                context.set_variable("last_created_file", abs_path)
+                created_files = context.get_variable("created_files", []) or []
+                if isinstance(created_files, list):
+                    created_files.append(abs_path)
+                    context.set_variable("created_files", created_files)
+            
+            # Handle move/copy destination updates
+            if cmd in ("mv", "cp") and len(args) >= 2:
+                dst = _expand(args[-1])
+                context.set_variable("last_created_file", dst)
     
     async def _execute_document_query(self, action: Action, context: ConversationContext) -> ActionResult:
         """Execute document query using indexed filesystem."""
