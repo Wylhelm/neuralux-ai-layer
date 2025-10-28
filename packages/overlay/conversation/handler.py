@@ -132,6 +132,27 @@ class OverlayConversationHandler:
                 loop_ready.wait(timeout=5.0)
                 
             return _async_loop
+
+    @staticmethod
+    def _reset_event_loop():
+        """Stop and clear the shared event loop to recover from stuck state."""
+        global _async_loop, _loop_thread
+        with _loop_lock:
+            try:
+                if _async_loop is not None:
+                    try:
+                        _async_loop.call_soon_threadsafe(_async_loop.stop)
+                    except Exception:
+                        pass
+            finally:
+                # Best-effort join
+                try:
+                    if _loop_thread is not None and _loop_thread.is_alive():
+                        _loop_thread.join(timeout=2.0)
+                except Exception:
+                    pass
+                _async_loop = None
+                _loop_thread = None
     
     def _run_async(self, coro):
         """
@@ -153,8 +174,10 @@ class OverlayConversationHandler:
             # Wait for result with timeout
             return future.result(timeout=30.0)
         except TimeoutError:
-            logger.error("Async operation timed out")
+            logger.error("Async operation timed out - resetting conversational event loop")
             future.cancel()
+            # Force-reset loop to recover on next call
+            self._reset_event_loop()
             raise TimeoutError("Operation timed out")
     
     async def _process_message_internal(self, user_input: str):
@@ -302,18 +325,39 @@ class OverlayConversationHandler:
             logger.error("Error getting context", error=str(e))
             return {}
     
-    async def _reset_conversation_internal(self):
-        """Internal coroutine for resetting conversation."""
-        await self._ensure_handler_initialized()
-        await self.handler.reset_conversation()
-    
     def reset_conversation(self):
         """Reset the conversation context."""
         try:
-            self._run_async(self._reset_conversation_internal())
+            if self.handler is None:
+                # Handler not initialized yet - just log and return
+                logger.info("Conversation reset (handler not yet initialized)")
+                return
+            
+            # reset_conversation() is synchronous, not async - just call it directly
+            self.handler.reset_conversation()
             logger.info("Conversation reset")
+
+            # Cleanly disconnect handler bus (async) and drop handler, then reset loop
+            try:
+                async def _shutdown_internal():
+                    try:
+                        bus = getattr(self.handler, "message_bus", None)
+                        if bus is not None and getattr(bus, "nc", None) is not None:
+                            await bus.disconnect()
+                    except Exception:
+                        pass
+                try:
+                    self._run_async(_shutdown_internal())
+                except Exception:
+                    pass
+            finally:
+                self._pending_actions = None
+                self._approval_future = None
+                self.handler = None
+                # Ensure subsequent calls start with a fresh loop if needed
+                self._reset_event_loop()
         except Exception as e:
-            logger.error("Error resetting conversation", error=str(e))
+            logger.error("Error resetting conversation", error=str(e), exc_info=True)
     
     def format_result_for_display(self, result: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -340,8 +384,9 @@ class OverlayConversationHandler:
         elif result_type == "response":
             return {
                 "type": "response",
-                "message": result.get("message", ""),
-                "actions_executed": result.get("actions_executed", []),
+                "message": result.get("message", result.get("content", "")),
+                # Normalize to actions_executed for the UI
+                "actions_executed": result.get("actions_executed") or result.get("actions", []),
                 "success": result.get("success", True),
             }
         
@@ -358,17 +403,18 @@ class OverlayConversationHandler:
     def session_info(self) -> Dict[str, Any]:
         """Get session information for display."""
         try:
-            context = self._run_async(self.handler.get_conversation_context())
-            if context:
+            # Avoid awaiting None. Use handler context directly if available.
+            if self.handler and getattr(self.handler, "context", None) is not None:
+                ctx = self.handler.context
                 return {
                     "session_id": self.session_id,
-                    "turn_count": len(context.turns),
-                    "variables": len(context.variables),
-                    "has_context": bool(context.variables),
+                    "turn_count": len(getattr(ctx, "turns", []) or []),
+                    "variables": len(getattr(ctx, "variables", {}) or {}),
+                    "has_context": bool(getattr(ctx, "variables", {}) or {}),
                 }
         except Exception:
             pass
-        
+
         return {
             "session_id": self.session_id,
             "turn_count": 0,

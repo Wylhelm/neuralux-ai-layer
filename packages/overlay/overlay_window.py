@@ -35,6 +35,8 @@ class OverlayWindow(Gtk.ApplicationWindow):
         self.conversation_handler: Optional[OverlayConversationHandler] = None
         self._conversation_mode_enabled = False
         self._pending_approval_dialog = None
+        self._pending_approval_widget = None
+        self._pending_approval_handlers = None  # {"approve": callable, "cancel": callable}
         
         # Window properties
         self.set_title("Neuralux")
@@ -131,16 +133,12 @@ class OverlayWindow(Gtk.ApplicationWindow):
         except Exception:
             pass
         controls_box.append(self.speaker_button)
-        
-        # New chat button
-        self.new_chat_button = Gtk.Button(label="🆕")
-        self.new_chat_button.set_tooltip_text("Start new conversation (/fresh)")
+        # Initialize TTS state from config default
         try:
-            self.new_chat_button.connect("clicked", lambda _b: self.on_command("/fresh"))
+            self.set_tts_enabled(bool(getattr(self.config, "tts_enabled_default", False)))
         except Exception:
             pass
-        controls_box.append(self.new_chat_button)
-
+        
         # History button
         self.history_button = Gtk.Button(label="🕘")
         self.history_button.set_tooltip_text("Show conversation history (/history)")
@@ -497,13 +495,21 @@ class OverlayWindow(Gtk.ApplicationWindow):
         )
 
     def _on_mic_clicked(self, _button):
-        """Start a single-turn voice capture via on_command."""
+        """Handle mic button depending on mode (traditional vs conversational)."""
         try:
-            # Optimistically set recording state in UI
-            self.indicate_recording(True)
-            self.on_command("/voice")
+            if self._conversation_mode_enabled:
+                # If an approval prompt is active AND handlers exist, run short approval flow
+                approval_widget = getattr(self, "_pending_approval_widget", None)
+                approval_handlers = getattr(self, "_pending_approval_handlers", None)
+                if approval_widget is not None and approval_handlers:
+                    self._voice_approve_flow()
+                else:
+                    self._start_conversational_voice_capture()
+            else:
+                # Traditional (non-conversational) mode delegates to CLI handler
+                self.indicate_recording(True)
+                self.on_command("/voice")
         except Exception:
-            # Revert on failure
             try:
                 self.indicate_recording(False)
             except Exception:
@@ -735,12 +741,492 @@ class OverlayWindow(Gtk.ApplicationWindow):
                 self.mic_button.set_label("⏺️")
                 self.set_status("Listening... (I'll detect when you're done)")
                 self.mic_button.set_sensitive(False)
+                logger.debug("Recording started")
             else:
                 self.mic_button.set_label("🎤")
                 self.set_status("Ready")
                 self.mic_button.set_sensitive(True)
+                logger.debug("Recording stopped")
+        except Exception as e:
+            logger.error("Error indicating recording state", error=str(e), exc_info=True)
+
+    def _start_conversational_voice_capture(self):
+        """Capture voice with VAD, run STT via message bus, and feed transcript to conversation handler."""
+        try:
+            # UI: show recording state
+            self.indicate_recording(True)
         except Exception:
             pass
+
+        import threading
+
+        def _worker():
+            try:
+                # Check if audio service is available
+                if not self._message_bus:
+                    GLib.idle_add(lambda: (self.indicate_recording(False), self.show_toast("Message bus not connected")) or False)
+                    return
+            except Exception:
+                pass
+            
+            try:
+                # Attempt PyAudio capture with simple VAD similar to CLI
+                try:
+                    import pyaudio, wave, tempfile, struct
+                    audio_format = pyaudio.paInt16
+                    channels = 1
+                    rate = 16000
+                    chunk = 1024
+
+                    p = pyaudio.PyAudio()
+                    stream = p.open(format=audio_format, channels=channels, rate=rate, input=True, frames_per_buffer=chunk)
+                    frames = []
+
+                    # Pull VAD thresholds from overlay config
+                    cfg_threshold = float(getattr(self.config, "vad_silence_threshold", 0.01))
+                    silence_duration = float(getattr(self.config, "vad_silence_duration", 1.5))
+                    # Allow user to configure silence duration via env
+                    max_recording_time = int(getattr(self.config, "vad_max_recording_time", 15))
+                    min_recording_time = int(getattr(self.config, "vad_min_recording_time", 1))
+
+                    silence_frames = 0
+                    silence_frame_count = int(rate / chunk * silence_duration)
+                    total_frames = 0
+                    max_frames = int(rate / chunk * max_recording_time)
+                    min_frames = int(rate / chunk * min_recording_time)
+
+                    speech_detected = False
+
+                    # Dynamic noise calibration (first ~0.4s)
+                    try:
+                        calibration_frames = max(1, int(rate / chunk * 0.4))
+                        noise_accum = 0.0
+                        noise_count = 0
+                        for _ in range(calibration_frames):
+                            data0 = stream.read(chunk, exception_on_overflow=False)
+                            frames.append(data0)
+                            total_frames += 1
+                            audio_cal = struct.unpack(f"{chunk}h", data0)
+                            rms0 = (sum(x * x for x in audio_cal) / len(audio_cal)) ** 0.5
+                            noise_accum += rms0
+                            noise_count += 1
+                        noise_rms = (noise_accum / max(1, noise_count)) if noise_count else 0.0
+                        # If cfg_threshold < 1, treat as dynamic; else absolute RMS
+                        dyn_factor = float(getattr(self.config, "vad_dynamic_factor", 1.8))
+                        min_rms = int(getattr(self.config, "vad_min_rms", 120))
+                        silence_threshold = max(int(noise_rms * dyn_factor), min_rms) if cfg_threshold < 1.0 else cfg_threshold
+                    except Exception:
+                        silence_threshold = int(getattr(self.config, "vad_min_rms", 120))
+
+                    while total_frames < max_frames:
+                        data = stream.read(chunk, exception_on_overflow=False)
+                        frames.append(data)
+                        total_frames += 1
+
+                        audio_data = struct.unpack(f"{chunk}h", data)
+                        rms = (sum(x * x for x in audio_data) / len(audio_data)) ** 0.5
+
+                        if rms > silence_threshold:
+                            speech_detected = True
+                            silence_frames = 0
+                        else:
+                            silence_frames += 1
+                            if silence_frames >= silence_frame_count and total_frames >= min_frames and speech_detected:
+                                break
+
+                    stream.stop_stream()
+                    stream.close()
+                    
+                    if not speech_detected:
+                        p.terminate()
+                        GLib.idle_add(lambda: (self.indicate_recording(False), self.show_toast("No speech detected")) or False)
+                        return
+
+                    # Get sample size BEFORE terminating PyAudio
+                    sample_width = p.get_sample_size(audio_format)
+                    p.terminate()
+
+                    # Persist to temp wav
+                    with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
+                        temp_path = f.name
+                    wf = wave.open(temp_path, "wb")
+                    wf.setnchannels(channels)
+                    wf.setsampwidth(sample_width)
+                    wf.setframerate(rate)
+                    wf.writeframes(b"".join(frames))
+                    wf.close()
+                except Exception as rec_err:
+                    GLib.idle_add(lambda: (self.indicate_recording(False), self.show_toast(f"Recording error: {rec_err}")) or False)
+                    return
+
+                # STT via Audio HTTP API (with fallbacks)
+                transcript = ""
+                try:
+                    import httpx, os
+                    # Get language from config
+                    language = getattr(self.config, "stt_language", "en")
+                    # First: with VAD filter
+                    with open(temp_path, "rb") as f:
+                        files = {"file": ("speech.wav", f, "audio/wav")}
+                        resp = httpx.post(
+                            "http://localhost:8006/stt/file",
+                            params={"language": language, "vad_filter": "true"},
+                            files=files,
+                            timeout=60.0,
+                        )
+                    if resp.status_code == 200:
+                        data = resp.json()
+                        transcript = (data.get("text") or "").strip()
+                    # Second: retry without VAD
+                    if not transcript:
+                        try:
+                            with open(temp_path, "rb") as f2:
+                                files2 = {"file": ("speech.wav", f2, "audio/wav")}
+                                resp2 = httpx.post(
+                                    "http://localhost:8006/stt/file",
+                                    params={"language": language, "vad_filter": "false"},
+                                    files=files2,
+                                    timeout=60.0,
+                                )
+                            if resp2.status_code == 200:
+                                data2 = resp2.json()
+                                transcript = (data2.get("text") or "").strip()
+                        except Exception:
+                            pass
+                    # Third: fallback to bus STT if still empty
+                    if not transcript and self._message_bus:
+                        try:
+                            stt_fb = self._message_bus.request(
+                                "ai.audio.stt",
+                                {"audio_path": temp_path, "vad_filter": False, "language": language},
+                                timeout=30.0,
+                            )
+                            try:
+                                stt_fb = stt_fb if isinstance(stt_fb, dict) else stt_fb.result(30.0)
+                            except Exception:
+                                pass
+                            if isinstance(stt_fb, dict) and "error" not in stt_fb:
+                                transcript = (stt_fb.get("text") or "").strip()
+                        except Exception:
+                            pass
+                finally:
+                    try:
+                        import os
+                        os.unlink(temp_path)
+                    except Exception:
+                        pass
+
+                # UI off for recording
+                GLib.idle_add(lambda: self.indicate_recording(False) or False)
+
+                if not transcript:
+                    GLib.idle_add(lambda: self.show_toast("Didn't catch that") or False)
+                    logger.warning("Voice capture: no transcript")
+                    return
+
+                # Feed into conversation handler with error protection
+                logger.info("Voice capture: transcript received", length=len(transcript))
+                
+                def _safe_process():
+                    try:
+                        self.search_entry.set_text("")
+                        self._process_conversational_input(transcript)
+                    except Exception as proc_err:
+                        logger.error("Error processing conversational input", error=str(proc_err), exc_info=True)
+                        self.show_toast(f"Processing error: {proc_err}")
+                        # Ensure we re-enable the mic button
+                        self.indicate_recording(False)
+                    return False
+                
+                GLib.idle_add(_safe_process)
+
+            except Exception as e:
+                logger.error("Voice capture error", error=str(e), exc_info=True)
+                GLib.idle_add(lambda: (self.indicate_recording(False), self.show_toast(f"Voice error: {e}")) or False)
+
+        threading.Thread(target=_worker, daemon=True).start()
+
+    def _voice_approve_flow(self):
+        """Short voice capture to detect approve/cancel during pending approval."""
+        try:
+            self.indicate_recording(True)
+        except Exception:
+            pass
+
+        import threading
+
+        def _worker():
+            try:
+                # Reuse conversational capture but bias to shorter min duration
+                try:
+                    import pyaudio, wave, tempfile, struct
+                    audio_format = pyaudio.paInt16
+                    channels = 1
+                    rate = 16000
+                    chunk = 1024
+                    p = pyaudio.PyAudio()
+                    stream = p.open(format=audio_format, channels=channels, rate=rate, input=True, frames_per_buffer=chunk)
+                    frames = []
+
+                    cfg_threshold = float(getattr(self.config, "vad_silence_threshold", 0.01))
+                    silence_duration = 0.5  # shorter for approvals
+                    max_recording_time = 6
+                    min_recording_time = 0.6
+
+                    silence_frames = 0
+                    silence_frame_count = int(rate / chunk * silence_duration)
+                    total_frames = 0
+                    max_frames = int(rate / chunk * max_recording_time)
+                    min_frames = int(rate / chunk * min_recording_time)
+                    speech_detected = False
+
+                    # Dynamic noise calibration (~0.3s) for approvals
+                    try:
+                        calibration_frames = max(1, int(rate / chunk * 0.3))
+                        noise_accum = 0.0
+                        noise_count = 0
+                        for _ in range(calibration_frames):
+                            data0 = stream.read(chunk, exception_on_overflow=False)
+                            frames.append(data0)
+                            total_frames += 1
+                            audio_cal = struct.unpack(f"{chunk}h", data0)
+                            rms0 = (sum(x * x for x in audio_cal) / len(audio_cal)) ** 0.5
+                            noise_accum += rms0
+                            noise_count += 1
+                        noise_rms = (noise_accum / max(1, noise_count)) if noise_count else 0.0
+                        dyn_factor = float(getattr(self.config, "vad_dynamic_factor", 1.8))
+                        min_rms = int(getattr(self.config, "vad_min_rms", 120))
+                        silence_threshold = max(int(noise_rms * dyn_factor), min_rms) if cfg_threshold < 1.0 else cfg_threshold
+                    except Exception:
+                        silence_threshold = int(getattr(self.config, "vad_min_rms", 120))
+
+                    while total_frames < max_frames:
+                        data = stream.read(chunk, exception_on_overflow=False)
+                        frames.append(data)
+                        total_frames += 1
+                        audio_data = struct.unpack(f"{chunk}h", data)
+                        rms = (sum(x * x for x in audio_data) / len(audio_data)) ** 0.5
+                        if rms > silence_threshold:
+                            speech_detected = True
+                            silence_frames = 0
+                        else:
+                            silence_frames += 1
+                            if silence_frames >= silence_frame_count and total_frames >= min_frames and speech_detected:
+                                break
+
+                    stream.stop_stream()
+                    stream.close()
+
+                    if not speech_detected:
+                        p.terminate()
+                        GLib.idle_add(lambda: (self.indicate_recording(False), self.show_toast("No speech detected")) or False)
+                        return
+
+                    # Get sample size BEFORE terminating PyAudio
+                    sample_width = p.get_sample_size(audio_format)
+                    p.terminate()
+
+                    with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
+                        temp_path = f.name
+                    wf = wave.open(temp_path, "wb")
+                    wf.setnchannels(channels)
+                    wf.setsampwidth(sample_width)
+                    wf.setframerate(rate)
+                    wf.writeframes(b"".join(frames))
+                    wf.close()
+                except Exception as rec_err:
+                    GLib.idle_add(lambda: (self.indicate_recording(False), self.show_toast(f"Recording error: {rec_err}")) or False)
+                    return
+
+                # STT via Audio HTTP API (with fallbacks)
+                transcript = ""
+                try:
+                    import httpx, os
+                    # Get language from config
+                    language = getattr(self.config, "stt_language", "en")
+                    with open(temp_path, "rb") as f:
+                        files = {"file": ("speech.wav", f, "audio/wav")}
+                        resp = httpx.post(
+                            "http://localhost:8006/stt/file",
+                            params={"language": language, "vad_filter": "true"},
+                            files=files,
+                            timeout=30.0,
+                        )
+                    if resp.status_code == 200:
+                        data = resp.json()
+                        transcript = (data.get("text") or "").strip().lower()
+                    # Retry without VAD if empty
+                    if not transcript:
+                        try:
+                            with open(temp_path, "rb") as f2:
+                                files2 = {"file": ("speech.wav", f2, "audio/wav")}
+                                resp2 = httpx.post(
+                                    "http://localhost:8006/stt/file",
+                                    params={"language": language, "vad_filter": "false"},
+                                    files=files2,
+                                    timeout=30.0,
+                                )
+                            if resp2.status_code == 200:
+                                data2 = resp2.json()
+                                transcript = (data2.get("text") or "").strip().lower()
+                        except Exception:
+                            pass
+                    # Final fallback to bus STT if still empty
+                    if not transcript and self._message_bus:
+                        try:
+                            stt_fb = self._message_bus.request(
+                                "ai.audio.stt",
+                                {"audio_path": temp_path, "vad_filter": False, "language": language},
+                                timeout=20.0,
+                            )
+                            try:
+                                stt_fb = stt_fb if isinstance(stt_fb, dict) else stt_fb.result(20.0)
+                            except Exception:
+                                pass
+                            if isinstance(stt_fb, dict) and "error" not in stt_fb:
+                                transcript = (stt_fb.get("text") or "").strip().lower()
+                        except Exception:
+                            pass
+                finally:
+                    try:
+                        import os
+                        os.unlink(temp_path)
+                    except Exception:
+                        pass
+
+                GLib.idle_add(lambda: self.indicate_recording(False) or False)
+
+                if not transcript:
+                    GLib.idle_add(lambda: self.show_toast("Didn't catch that") or False)
+                    return
+
+                def _decide():
+                    try:
+                        handlers = getattr(self, "_pending_approval_handlers", None)
+                        if not handlers:
+                            return False
+                        txt = transcript
+                        approve_words = ["approve", "yes", "go ahead", "proceed", "ok", "okay", "confirm", "do it"]
+                        cancel_words = ["cancel", "no", "stop", "don't", "abort", "decline"]
+                        if any(w in txt for w in approve_words):
+                            handlers.get("approve", lambda: None)()
+                            self._pending_approval_handlers = None
+                            return False
+                        if any(w in txt for w in cancel_words):
+                            handlers.get("cancel", lambda: None)()
+                            self._pending_approval_handlers = None
+                            return False
+                        self.show_toast("Say 'approve' or 'cancel'")
+                    except Exception:
+                        pass
+                    return False
+
+                GLib.idle_add(_decide)
+
+            except Exception as e:
+                GLib.idle_add(lambda: (self.indicate_recording(False), self.show_toast(f"Voice error: {e}")) or False)
+
+        threading.Thread(target=_worker, daemon=True).start()
+
+    def _speak(self, text: str):
+        """Background TTS via audio service; best-effort playback."""
+        if not text:
+            return
+        import threading
+
+        # Lazily create a playback lock to prevent overlapping audio and hangs
+        if not hasattr(self, "_tts_lock") or getattr(self, "_tts_lock", None) is None:
+            try:
+                self._tts_lock = threading.Lock()
+            except Exception:
+                self._tts_lock = None
+
+        def _worker():
+            import base64, tempfile, subprocess, os, shutil, httpx
+            try:
+                # Serialize playback to avoid driver/sink contention
+                lock = getattr(self, "_tts_lock", None)
+                acquired = False
+                if lock is not None:
+                    acquired = lock.acquire(blocking=False)
+                    if not acquired:
+                        # Another playback in progress; skip to avoid deadlock
+                        logger.warning("TTS playback skipped: busy")
+                        return
+
+                try:
+                    # Request TTS audio from audio service
+                    resp = httpx.post(
+                        "http://localhost:8006/tts",
+                        json={"text": text, "output_format": "wav"},
+                        timeout=30.0,
+                    )
+                    if resp.status_code != 200:
+                        logger.error("TTS HTTP error", status=resp.status_code)
+                        return
+                    data = resp.json()
+                    audio_b64 = data.get("audio_data", "")
+                    if not audio_b64:
+                        logger.error("TTS response missing audio_data")
+                        return
+
+                    audio_data = base64.b64decode(audio_b64)
+                    with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
+                        f.write(audio_data)
+                        path = f.name
+
+                    try:
+                        # Try paplay with timeout, then aplay, then ffplay
+                        played = False
+                        try:
+                            subprocess.run(["paplay", path], check=True, capture_output=True, timeout=20)
+                            played = True
+                        except subprocess.TimeoutExpired:
+                            logger.error("TTS playback timed out", player="paplay")
+                        except Exception as e:
+                            logger.warning("paplay failed; falling back", error=str(e))
+
+                        if not played:
+                            try:
+                                subprocess.run(["aplay", path], check=True, capture_output=True, timeout=20)
+                                played = True
+                            except subprocess.TimeoutExpired:
+                                logger.error("TTS playback timed out", player="aplay")
+                            except Exception as e:
+                                logger.warning("aplay failed; falling back", error=str(e))
+
+                        if not played and shutil.which("ffplay"):
+                            try:
+                                subprocess.run([
+                                    "ffplay", "-nodisp", "-autoexit", "-loglevel", "error", path
+                                ], check=True, capture_output=True, timeout=25)
+                                played = True
+                            except subprocess.TimeoutExpired:
+                                logger.error("TTS playback timed out", player="ffplay")
+                            except Exception as e:
+                                logger.error("ffplay failed", error=str(e))
+
+                        if not played:
+                            logger.error("No audio player succeeded for TTS")
+                    finally:
+                        try:
+                            os.unlink(path)
+                        except Exception:
+                            pass
+                finally:
+                    if lock is not None and acquired:
+                        try:
+                            lock.release()
+                        except Exception:
+                            pass
+            except Exception as e:
+                # Swallow exceptions to avoid UI disruption, but log for diagnostics
+                try:
+                    logger.error("TTS playback error", error=str(e))
+                except Exception:
+                    pass
+
+        threading.Thread(target=_worker, daemon=True).start()
 
     def add_result(self, title: str, subtitle: str = "", payload: Optional[dict] = None):
         """Add a result to the list.
@@ -1076,6 +1562,23 @@ class OverlayWindow(Gtk.ApplicationWindow):
         """Handle refresh button click."""
         try:
             if self._conversation_mode_enabled and self.conversation_handler:
+                # Clear any pending approval UI/state first
+                try:
+                    if getattr(self, "_pending_approval_widget", None):
+                        try:
+                            self.conversation_history.remove_widget(self._pending_approval_widget)
+                        except Exception:
+                            pass
+                        self._pending_approval_widget = None
+                    self._pending_approval_handlers = None
+                    self._pending_approval_dialog = None
+                    # Also cancel pending actions in handler (best-effort)
+                    try:
+                        self.conversation_handler.cancel_pending_actions()
+                    except Exception:
+                        pass
+                except Exception:
+                    pass
                 # In conversation mode, reset the conversation
                 self.conversation_handler.reset_conversation()
                 self.conversation_history.clear_history()
@@ -1151,11 +1654,14 @@ class OverlayWindow(Gtk.ApplicationWindow):
             
             # Show loading indicator
             loading = self.conversation_history.add_loading_indicator("Thinking...")
+            # Watchdog to recover if async callback never arrives
+            finished = [False]
             
             # Process message asynchronously
             def _on_result(result, error):
                 # Remove loading indicator
                 self.conversation_history.remove_widget(loading)
+                finished[0] = True
                 
                 if error:
                     logger.error("Conversation processing error", error=str(error))
@@ -1184,17 +1690,108 @@ class OverlayWindow(Gtk.ApplicationWindow):
                     message = formatted.get("message", result.get("message", "Done!"))
                     
                     # If there's LLM-generated text, use that as the message
+                    llm_text = None
                     if "last_generated_text" in result:
                         message = result["last_generated_text"]
+                        llm_text = message
                     elif "content" in result:
                         message = result["content"]
+                        llm_text = message
+                    
+                    # Get actions list
+                    actions_list = (
+                        formatted.get("actions_executed")
+                        or formatted.get("actions")
+                        or result.get("actions_executed")
+                        or result.get("actions")
+                        or []
+                    )
+                    
+                    # For responses with actions, check if it's an llm_generate action
+                    if actions_list:
+                        for action in actions_list:
+                            if action.get("action_type") == "llm_generate":
+                                # Use the LLM-generated content from the action result
+                                action_details = action.get("details", {})
+                                if not action_details:
+                                    action_details = action.get("result", {}).get("details", {})
+                                llm_content = action_details.get("content", "")
+                                if llm_content:
+                                    message = llm_content
+                                    llm_text = llm_content
+                                break
+                    elif message:
+                        # No actions - simple conversational response
+                        llm_text = message
                     
                     self.conversation_history.add_assistant_message(message)
                     
                     # Add action result cards
-                    actions_executed = formatted.get("actions_executed", result.get("actions_executed", []))
+                    # Prefer formatted actions list; fall back to raw result keys
+                    actions_executed = (
+                        formatted.get("actions_executed")
+                        or formatted.get("actions")
+                        or result.get("actions_executed")
+                        or result.get("actions")
+                        or []
+                    )
+                    
+                    # Auto TTS for conversational replies (best-effort)
+                    try:
+                        if getattr(self, "_tts_enabled", False):
+                            # Determine what to speak based on action types
+                            text_to_speak = None
+                            
+                            logger.info("TTS processing", 
+                                       tts_enabled=True,
+                                       has_actions=bool(actions_executed),
+                                       action_count=len(actions_executed) if actions_executed else 0,
+                                       has_llm_text=bool(llm_text))
+                            
+                            if actions_executed:
+                                action_types = [a.get("action_type", "") for a in actions_executed]
+                                logger.info("Action types detected", action_types=action_types)
+                                
+                                # For non-conversational actions, speak completion messages
+                                if action_types:
+                                    # Check if there's an LLM_GENERATE action (conversational response)
+                                    if "llm_generate" in action_types:
+                                        # Speak the actual AI response
+                                        text_to_speak = llm_text
+                                        logger.info("Speaking LLM response", length=len(text_to_speak) if text_to_speak else 0)
+                                    else:
+                                        # Speak completion message for actions
+                                        action_names = {
+                                            "command_execute": "Command executed successfully",
+                                            "web_search": "Web search completed successfully",
+                                            "document_query": "File search completed successfully",
+                                            "image_generate": "Picture generated successfully",
+                                            "image_save": "Image saved successfully",
+                                            "ocr_capture": "Text extracted successfully",
+                                        }
+                                        
+                                        # Use the first action type's completion message
+                                        primary_action = action_types[0]
+                                        text_to_speak = action_names.get(primary_action, "Action completed successfully")
+                                        logger.info("Speaking action completion", action=primary_action, message=text_to_speak)
+                            else:
+                                # No actions - likely just conversation, speak the message
+                                text_to_speak = llm_text
+                                logger.info("Speaking conversational message", length=len(text_to_speak) if text_to_speak else 0)
+                            
+                            if text_to_speak:
+                                logger.info("Calling _speak", text=text_to_speak[:50])
+                                self._speak(text_to_speak[:220])
+                            else:
+                                logger.warning("TTS enabled but no text to speak")
+                    except Exception as e:
+                        logger.error("TTS error", error=str(e), exc_info=True)
+                    
+                    # Add action result cards (but skip llm_generate since it's shown as message bubble)
                     for action in actions_executed:
-                        self.conversation_history.add_action_result(action)
+                        # Don't show LLM generation as a separate card - it's already in the message bubble
+                        if action.get("action_type") != "llm_generate":
+                            self.conversation_history.add_action_result(action)
                     
                     self.set_status("Ready")
                 
@@ -1213,6 +1810,31 @@ class OverlayWindow(Gtk.ApplicationWindow):
             # Start async processing
             self.conversation_handler.process_message_async(user_input, _on_result)
             self.set_status("Processing...")
+
+            # 35s watchdog: if no result, reset conversational engine
+            def _watchdog():
+                try:
+                    if not finished[0]:
+                        logger.error("Conversational response watchdog timeout - resetting handler")
+                        try:
+                            self.conversation_history.remove_widget(loading)
+                        except Exception:
+                            pass
+                        try:
+                            self.conversation_handler.reset_conversation()
+                        except Exception:
+                            pass
+                        self.conversation_history.add_assistant_message(
+                            "Sorry, that took too long. I've reset the voice engine; please try again."
+                        )
+                        self.set_status("Ready")
+                except Exception:
+                    pass
+                return False
+            try:
+                GLib.timeout_add_seconds(35, _watchdog)
+            except Exception:
+                pass
             
         except Exception as e:
             logger.error("Failed to process conversational input", error=str(e), exc_info=True)
@@ -1234,8 +1856,14 @@ class OverlayWindow(Gtk.ApplicationWindow):
                 self.conversation_handler._pending_actions = actions
             
             def on_approve():
-                # Close any existing dialog
+                # Close any existing dialog and remove approval widget
                 self._pending_approval_dialog = None
+                if hasattr(self, '_pending_approval_widget') and self._pending_approval_widget:
+                    try:
+                        self.conversation_history.remove_widget(self._pending_approval_widget)
+                    except Exception:
+                        pass
+                    self._pending_approval_widget = None
                 
                 # Show executing status
                 loading = self.conversation_history.add_loading_indicator("Executing actions...")
@@ -1280,6 +1908,8 @@ class OverlayWindow(Gtk.ApplicationWindow):
                 
                 # Execute approved actions
                 self.conversation_handler.approve_and_execute_async(_on_execute_result)
+                # Clear voice approval handlers
+                self._pending_approval_handlers = None
             
             def on_cancel():
                 # Remove approval widget from conversation
@@ -1290,6 +1920,11 @@ class OverlayWindow(Gtk.ApplicationWindow):
                 self.conversation_handler.cancel_pending_actions()
                 self.conversation_history.add_assistant_message("Actions cancelled.")
                 self.set_status("Ready")
+                # Clear voice approval handlers
+                self._pending_approval_handlers = None
+
+            # Expose handlers for voice approval
+            self._pending_approval_handlers = {"approve": on_approve, "cancel": on_cancel}
             
             # Create inline approval UI instead of separate dialog
             approval_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
