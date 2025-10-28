@@ -108,19 +108,23 @@ class VisionService:
                     seed=req.seed,
                 )
                 
-                # Convert to base64
-                buffer = BytesIO()
-                image.save(buffer, format="PNG")
-                image_b64 = base64.b64encode(buffer.getvalue()).decode("utf-8")
+                # Save to temp file to avoid NATS payload size limits
+                import tempfile
+                import time
+                temp_dir = tempfile.gettempdir()
+                timestamp = int(time.time() * 1000000)
+                image_path = f"{temp_dir}/neuralux_img_{timestamp}.png"
+                image.save(image_path, format="PNG")
                 
-                response = ImageGenResponse(
-                    image_bytes_b64=image_b64,
-                    prompt=req.prompt,
-                    model=self.image_gen.current_model or req.model,
-                    seed=req.seed,
-                    width=image.width,
-                    height=image.height,
-                ).model_dump()
+                # Return path instead of base64 for NATS (avoids payload limit)
+                response = {
+                    "image_path": image_path,
+                    "prompt": req.prompt,
+                    "model": self.image_gen.current_model or req.model,
+                    "seed": req.seed,
+                    "width": image.width,
+                    "height": image.height,
+                }
                 
                 # Publish result event
                 try:

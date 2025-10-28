@@ -12,6 +12,7 @@ Neuralux AI Layer integrates advanced AI capabilities directly into your Linux s
 - ✅ **Voice interface** - Speech-to-text and text-to-speech
 - ✅ **Image generation** - AI-powered image creation with Flux models
 - ✅ **OCR and vision** - Extract text from images and screens
+- ✅ **Conversational Intelligence** ✨ - Multi-step workflows with contextual memory
 - 🚧 Gesture and advanced GUI interactions (Phase 2/3)
 - ✅ **Privacy-first, local-first processing** - Your data stays on your machine
 
@@ -43,6 +44,30 @@ Neuralux uses a microservices architecture with:
 - **AI Services**: LLM, Vision, Audio processing
 - **System Integration**: File system intelligence, health monitoring, process management
 - **User Interfaces**: CLI, GUI, Voice, Gesture
+
+## ✨ New: Conversational Intelligence
+
+Experience natural, multi-step conversations with AI:
+
+```bash
+# Start conversational mode
+aish converse
+
+# Try these workflows:
+> create a file named mariec.txt
+> write a summary of Marie Curie in it
+> generate an image of Marie Curie
+> save it to my Pictures folder
+```
+
+**Features:**
+- 🔗 **Contextual memory** - Remembers everything in the conversation
+- 🎯 **Multi-step workflows** - Complex tasks from one request
+- 📝 **File operations** - Create, write, move files naturally
+- 🎨 **Image workflows** - Generate and save images
+- 🔄 **Reference resolution** - Understands "it", "that", "the image"
+
+[See full documentation](Documentation/CONVERSATIONAL_INTELLIGENCE.md)
 
 ## Quick Start
 

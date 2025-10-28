@@ -10,6 +10,11 @@ import structlog
 
 from .config import OverlayConfig
 from .search import suggest, Suggestion
+from .conversation import (
+    OverlayConversationHandler,
+    ConversationHistoryWidget,
+    ActionApprovalDialog,
+)
 
 logger = structlog.get_logger(__name__)
 
@@ -17,13 +22,19 @@ logger = structlog.get_logger(__name__)
 class OverlayWindow(Gtk.ApplicationWindow):
     """Main overlay window."""
     
-    def __init__(self, app, config: OverlayConfig, on_command: Callable[[str], None]):
+    def __init__(self, app, config: OverlayConfig, on_command: Callable[[str], None], message_bus=None):
         """Initialize the overlay window."""
         super().__init__(application=app)
         
         self.config = config
         self.on_command = on_command
         self._active_app: Optional[str] = None
+        self._message_bus = message_bus
+        
+        # Conversation handler (initialized later if message_bus available)
+        self.conversation_handler: Optional[OverlayConversationHandler] = None
+        self._conversation_mode_enabled = False
+        self._pending_approval_dialog = None
         
         # Window properties
         self.set_title("Neuralux")
@@ -147,12 +158,21 @@ class OverlayWindow(Gtk.ApplicationWindow):
         except Exception:
             pass
         controls_box.append(self.ocr_select_button)
+        
+        # Conversation mode toggle button
+        self.conversation_toggle_button = Gtk.Button(label="💬")
+        self.conversation_toggle_button.set_tooltip_text("Toggle conversational mode")
+        try:
+            self.conversation_toggle_button.connect("clicked", self._on_conversation_toggle)
+        except Exception:
+            pass
+        controls_box.append(self.conversation_toggle_button)
 
         # Refresh button
         self.refresh_button = Gtk.Button(label="↻")
-        self.refresh_button.set_tooltip_text("Refresh suggestions (/refresh)")
+        self.refresh_button.set_tooltip_text("Refresh / Reset conversation")
         try:
-            self.refresh_button.connect("clicked", lambda _b: self.on_command("/refresh"))
+            self.refresh_button.connect("clicked", self._on_refresh_clicked)
         except Exception:
             pass
         controls_box.append(self.refresh_button)
@@ -176,11 +196,15 @@ class OverlayWindow(Gtk.ApplicationWindow):
         self.search_entry.connect("changed", self._on_entry_changed)
         main_box.append(self.search_entry)
         
-        # Results list (scrollable)
+        # Create stack for switching between results list and conversation view
+        self.view_stack = Gtk.Stack()
+        self.view_stack.set_vexpand(True)
+        self.view_stack.set_margin_top(10)
+        
+        # Results list (scrollable) - Traditional mode
         scrolled = Gtk.ScrolledWindow()
         scrolled.set_size_request(-1, 400)
         scrolled.set_vexpand(True)
-        scrolled.set_margin_top(10)
         scrolled.get_style_context().add_class("results-scroller")
         
         # List box for results
@@ -189,7 +213,16 @@ class OverlayWindow(Gtk.ApplicationWindow):
         self.results_list.connect("row-activated", self._on_result_activated)
         scrolled.set_child(self.results_list)
         
-        main_box.append(scrolled)
+        self.view_stack.add_named(scrolled, "results")
+        
+        # Conversation history widget - Conversational mode
+        self.conversation_history = ConversationHistoryWidget()
+        self.view_stack.add_named(self.conversation_history, "conversation")
+        
+        # Start with results view
+        self.view_stack.set_visible_child_name("results")
+        
+        main_box.append(self.view_stack)
         
         # Status bar at bottom with spinner
         status_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
@@ -237,6 +270,10 @@ class OverlayWindow(Gtk.ApplicationWindow):
         self._setup_drag_controller()
         
         GLib.timeout_add_seconds(5, self._refresh_context)
+        
+        # Initialize conversation handler if message_bus available
+        if self._message_bus:
+            self._init_conversation_handler()
     
     def _setup_drag_controller(self):
         """Setup drag controller to make window movable via drag handle."""
@@ -328,6 +365,20 @@ class OverlayWindow(Gtk.ApplicationWindow):
     def _setup_styling(self):
         """Setup CSS styling."""
         css_provider = Gtk.CssProvider()
+        
+        # Load conversation styles from external file
+        try:
+            from pathlib import Path
+            conversation_css_path = Path(__file__).parent / "styles" / "conversation.css"
+            if conversation_css_path.exists():
+                with open(conversation_css_path, 'rb') as f:
+                    conversation_css = f.read()
+            else:
+                conversation_css = b""
+        except Exception as e:
+            logger.warning(f"Could not load conversation.css: {e}")
+            conversation_css = b""
+        
         css = b"""
         window {
             background: alpha(#1e1e2e, 0.95);
@@ -426,23 +477,24 @@ class OverlayWindow(Gtk.ApplicationWindow):
             border-color: #d73a49;
         }
         .cancel:hover { background: #5a3131; }
+        
+        .toast { 
+            background: #1f2937; 
+            color: #e5e7eb; 
+            border-radius: 8px; 
+            padding: 8px 14px; 
+        }
         """
-        css_provider.load_from_data(css)
+        
+        # Combine main CSS with conversation CSS
+        full_css = css + b"\n" + conversation_css
+        css_provider.load_from_data(full_css)
         
         Gtk.StyleContext.add_provider_for_display(
             Gdk.Display.get_default(),
             css_provider,
             Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
         )
-
-        # Extra CSS for toast
-        try:
-            extra = b"""
-            .toast { background: #1f2937; color: #e5e7eb; border-radius: 8px; padding: 8px 14px; }
-            """
-            css_provider.load_from_data(css + extra)
-        except Exception:
-            pass
 
     def _on_mic_clicked(self, _button):
         """Start a single-turn voice capture via on_command."""
@@ -488,6 +540,9 @@ class OverlayWindow(Gtk.ApplicationWindow):
                 self._generate_image_inline(text)
                 self._image_gen_mode = False
                 entry.set_placeholder_text("Type a command or question...")
+            # Check if in conversation mode
+            elif self._conversation_mode_enabled and self.conversation_handler:
+                self._process_conversational_input(text)
             else:
                 self.on_command(text)
             entry.set_text("")
@@ -987,6 +1042,326 @@ class OverlayWindow(Gtk.ApplicationWindow):
         except Exception:
             pass
 
+    # Conversation Mode Methods -------------------------------------------
+    
+    def _init_conversation_handler(self):
+        """Initialize the conversation handler."""
+        try:
+            if not self._message_bus:
+                logger.warning("Cannot initialize conversation handler: no message bus")
+                self._conversation_mode_enabled = False
+                # Disable conversation toggle button
+                if hasattr(self, 'conversation_toggle_button'):
+                    self.conversation_toggle_button.set_sensitive(False)
+                    self.conversation_toggle_button.set_tooltip_text("Conversation mode unavailable (message bus not connected)")
+                return
+            
+            self.conversation_handler = OverlayConversationHandler(
+                message_bus=self._message_bus,
+                session_id=None,  # Will use default overlay session
+                on_approval_needed=self._handle_approval_needed,
+                on_action_complete=self._handle_action_complete,
+                on_error=self._handle_conversation_error,
+            )
+            
+            logger.info("Conversation handler initialized successfully")
+        except Exception as e:
+            logger.error("Failed to initialize conversation handler", error=str(e), exc_info=True)
+            self._conversation_mode_enabled = False
+            if hasattr(self, 'conversation_toggle_button'):
+                self.conversation_toggle_button.set_sensitive(False)
+                self.conversation_toggle_button.set_tooltip_text(f"Conversation mode error: {e}")
+    
+    def _on_refresh_clicked(self, button):
+        """Handle refresh button click."""
+        try:
+            if self._conversation_mode_enabled and self.conversation_handler:
+                # In conversation mode, reset the conversation
+                self.conversation_handler.reset_conversation()
+                self.conversation_history.clear_history()
+                self.show_toast("✨ Conversation reset!")
+                self.set_status("Ready")
+                logger.info("Conversation reset via refresh button")
+            else:
+                # In traditional mode, refresh suggestions
+                self.on_command("/refresh")
+                self.show_toast("Refreshed")
+        except Exception as e:
+            logger.error("Failed to handle refresh", error=str(e))
+            self.show_toast("Reset failed")
+    
+    def _on_conversation_toggle(self, button):
+        """Toggle between conversation mode and traditional mode."""
+        try:
+            self._conversation_mode_enabled = not self._conversation_mode_enabled
+            
+            if self._conversation_mode_enabled:
+                # Switch to conversation view
+                self.view_stack.set_visible_child_name("conversation")
+                self.conversation_toggle_button.set_label("📋")
+                self.conversation_toggle_button.set_tooltip_text("Switch to traditional mode")
+                self.search_entry.set_placeholder_text("Type your message...")
+                self.set_status("Conversational mode active")
+                self.show_toast("Conversational mode enabled")
+                
+                # Load existing history if available
+                if self.conversation_handler:
+                    self._load_conversation_history()
+            else:
+                # Switch to results view
+                self.view_stack.set_visible_child_name("results")
+                self.conversation_toggle_button.set_label("💬")
+                self.conversation_toggle_button.set_tooltip_text("Switch to conversational mode")
+                self.search_entry.set_placeholder_text("Type a command or question...")
+                self.set_status("Traditional mode active")
+                self.show_toast("Traditional mode enabled")
+        except Exception as e:
+            logger.error("Failed to toggle conversation mode", error=str(e))
+    
+    def _load_conversation_history(self):
+        """Load conversation history into the view."""
+        try:
+            if not self.conversation_handler:
+                return
+            
+            turns = self.conversation_handler.get_conversation_history()
+            self.conversation_history.load_history(turns)
+            logger.info(f"Loaded {len(turns)} conversation turns")
+        except Exception as e:
+            logger.error("Failed to load conversation history", error=str(e))
+    
+    def _process_conversational_input(self, user_input: str):
+        """
+        Process user input in conversational mode.
+        
+        Args:
+            user_input: The user's message
+        """
+        if not self.conversation_handler:
+            self.show_toast("Conversation mode unavailable - message bus not connected")
+            self.conversation_history.add_assistant_message(
+                "⚠️ Conversation mode is not available. Make sure services are running: 'make start-all'"
+            )
+            logger.error("Attempted to use conversation mode without handler initialized")
+            return
+        
+        try:
+            # Add user message to history immediately
+            self.conversation_history.add_user_message(user_input)
+            
+            # Show loading indicator
+            loading = self.conversation_history.add_loading_indicator("Thinking...")
+            
+            # Process message asynchronously
+            def _on_result(result, error):
+                # Remove loading indicator
+                self.conversation_history.remove_widget(loading)
+                
+                if error:
+                    logger.error("Conversation processing error", error=str(error))
+                    self.conversation_history.add_assistant_message(
+                        f"Sorry, an error occurred: {str(error)}"
+                    )
+                    self.set_status("Error")
+                    return
+                
+                # Format and display result
+                formatted = self.conversation_handler.format_result_for_display(result)
+                result_type = formatted.get("type", "unknown")
+                
+                # Log for debugging
+                logger.info(f"Displaying result type: {result_type}")
+                
+                if result_type == "needs_approval":
+                    # Show approval dialog
+                    self._show_approval_dialog(formatted)
+                    self.conversation_history.add_assistant_message(
+                        "I've planned some actions that need your approval."
+                    )
+                
+                elif result_type == "response" or result_type == "success":
+                    # Handle both "response" and "success" result types
+                    message = formatted.get("message", result.get("message", "Done!"))
+                    
+                    # If there's LLM-generated text, use that as the message
+                    if "last_generated_text" in result:
+                        message = result["last_generated_text"]
+                    elif "content" in result:
+                        message = result["content"]
+                    
+                    self.conversation_history.add_assistant_message(message)
+                    
+                    # Add action result cards
+                    actions_executed = formatted.get("actions_executed", result.get("actions_executed", []))
+                    for action in actions_executed:
+                        self.conversation_history.add_action_result(action)
+                    
+                    self.set_status("Ready")
+                
+                elif result_type == "error":
+                    error_msg = formatted.get("message", "An error occurred")
+                    self.conversation_history.add_assistant_message(error_msg)
+                    self.set_status("Error")
+                
+                else:
+                    # Unknown result type - display whatever we have
+                    logger.warning(f"Unknown result type: {result_type}")
+                    message = str(result.get("message", result.get("content", "Completed")))
+                    self.conversation_history.add_assistant_message(message)
+                    self.set_status("Ready")
+            
+            # Start async processing
+            self.conversation_handler.process_message_async(user_input, _on_result)
+            self.set_status("Processing...")
+            
+        except Exception as e:
+            logger.error("Failed to process conversational input", error=str(e), exc_info=True)
+            self.show_toast(f"Error: {e}")
+    
+    def _show_approval_dialog(self, approval_data: dict):
+        """
+        Show approval dialog for pending actions.
+        
+        Args:
+            approval_data: Formatted approval data from conversation handler
+        """
+        try:
+            actions = approval_data.get("actions", [])
+            message = approval_data.get("message", "The AI wants to perform these actions:")
+            
+            # Store pending actions in the conversation handler
+            if self.conversation_handler:
+                self.conversation_handler._pending_actions = actions
+            
+            def on_approve():
+                # Close any existing dialog
+                self._pending_approval_dialog = None
+                
+                # Show executing status
+                loading = self.conversation_history.add_loading_indicator("Executing actions...")
+                
+                def _on_execute_result(result, error):
+                    # Remove loading indicator
+                    self.conversation_history.remove_widget(loading)
+                    
+                    if error:
+                        self.conversation_history.add_assistant_message(
+                            f"Execution failed: {str(error)}"
+                        )
+                        self.set_status("Ready")
+                        return
+                    
+                    # Display results
+                    logger.info("Execution result received", result_keys=list(result.keys()) if result else None)
+                    
+                    # Check if the result has action details
+                    actions_executed = result.get("actions_executed", result.get("actions", []))
+                    
+                    logger.info(f"Actions to display: {len(actions_executed)}")
+                    
+                    # If there are executed actions, show them
+                    if actions_executed:
+                        for action in actions_executed:
+                            logger.info("Adding action result", 
+                                       action_type=action.get("action_type"),
+                                       has_details=bool(action.get("details")),
+                                       has_output="output" in action.get("details", {}))
+                            self.conversation_history.add_action_result(action)
+                    else:
+                        logger.warning("No actions_executed in result!", result_keys=list(result.keys()))
+                    
+                    # Show summary message
+                    message = result.get("message", result.get("explanation", "Actions completed!"))
+                    if message and message != "Actions completed!":
+                        self.conversation_history.add_assistant_message(message)
+                    
+                    self.set_status("Ready")
+                    self.show_toast("✓ Done!")
+                
+                # Execute approved actions
+                self.conversation_handler.approve_and_execute_async(_on_execute_result)
+            
+            def on_cancel():
+                # Remove approval widget from conversation
+                if hasattr(self, '_pending_approval_widget') and self._pending_approval_widget:
+                    self.conversation_history.remove_widget(self._pending_approval_widget)
+                    self._pending_approval_widget = None
+                
+                self.conversation_handler.cancel_pending_actions()
+                self.conversation_history.add_assistant_message("Actions cancelled.")
+                self.set_status("Ready")
+            
+            # Create inline approval UI instead of separate dialog
+            approval_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+            approval_box.add_css_class("approval-card")
+            approval_box.set_margin_top(2)
+            approval_box.set_margin_bottom(2)
+            approval_box.set_margin_start(6)
+            approval_box.set_margin_end(6)
+            
+            # Message label
+            msg_label = Gtk.Label(label=message, wrap=True, xalign=0)
+            msg_label.add_css_class("approval-message")
+            approval_box.append(msg_label)
+            
+            # Actions list
+            actions_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+            actions_box.add_css_class("approval-actions-list")
+            actions_box.set_margin_start(6)
+            
+            for i, action in enumerate(actions, 1):
+                action_text = action.get('description', action.get('action_type', 'Unknown action'))
+                action_label = Gtk.Label(
+                    label=f"• {action_text}",
+                    wrap=True,
+                    xalign=0
+                )
+                action_label.add_css_class("approval-action-item")
+                actions_box.append(action_label)
+            
+            approval_box.append(actions_box)
+            
+            # Buttons
+            buttons_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
+            buttons_box.set_halign(Gtk.Align.END)
+            buttons_box.set_margin_top(4)
+            buttons_box.add_css_class("approval-buttons")
+            
+            cancel_btn = Gtk.Button(label="✕ Cancel")
+            cancel_btn.add_css_class("approval-cancel-btn")
+            cancel_btn.add_css_class("destructive-action")
+            cancel_btn.connect("clicked", lambda btn: on_cancel())
+            
+            approve_btn = Gtk.Button(label="✓ Approve & Execute")
+            approve_btn.add_css_class("approval-approve-btn")
+            approve_btn.add_css_class("suggested-action")
+            approve_btn.connect("clicked", lambda btn: on_approve())
+            
+            buttons_box.append(cancel_btn)
+            buttons_box.append(approve_btn)
+            approval_box.append(buttons_box)
+            
+            # Add to conversation history
+            self.conversation_history.add_widget(approval_box)
+            self._pending_approval_widget = approval_box
+            
+        except Exception as e:
+            logger.error("Failed to show approval dialog", error=str(e), exc_info=True)
+    
+    def _handle_approval_needed(self, action):
+        """Callback when an action needs approval."""
+        # This is called from the handler - we handle it in _show_approval_dialog
+        pass
+    
+    def _handle_action_complete(self, action):
+        """Callback when an action completes."""
+        logger.info("Action completed", action_type=action.get("action_type"))
+    
+    def _handle_conversation_error(self, error):
+        """Callback for conversation errors."""
+        logger.error("Conversation error", error=str(error))
+        self.show_toast(f"Error: {error}")
+    
     # Dialogs -------------------------------------------------------------
     def show_about_dialog(self):
         """Show a native About dialog if available, otherwise a simple window."""
@@ -1801,18 +2176,19 @@ class OverlayWindow(Gtk.ApplicationWindow):
 class OverlayApplication(Gtk.Application):
     """GTK Application for the overlay."""
     
-    def __init__(self, config: OverlayConfig, on_command: Callable[[str], None]):
+    def __init__(self, config: OverlayConfig, on_command: Callable[[str], None], message_bus=None):
         """Initialize the application."""
         super().__init__(application_id="com.neuralux.overlay")
         
         self.config = config
         self.on_command = on_command
+        self.message_bus = message_bus
         self.window = None
     
     def do_activate(self):
         """Activate the application."""
         if not self.window:
-            self.window = OverlayWindow(self, self.config, self.on_command)
+            self.window = OverlayWindow(self, self.config, self.on_command, self.message_bus)
         
         self.window.present()
 

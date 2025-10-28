@@ -71,3 +71,61 @@ class IndexResponse(BaseModel):
     errors: List[str] = []
     duration_seconds: float
 
+
+class FileWriteRequest(BaseModel):
+    """Request to write to a file."""
+    file_path: str
+    content: str
+    mode: str = "w"  # 'w' for write, 'a' for append
+    create_dirs: bool = True
+
+
+class FileWriteResponse(BaseModel):
+    """Response from file write operation."""
+    success: bool
+    file_path: str
+    bytes_written: int
+    error: Optional[str] = None
+
+
+class FileReadRequest(BaseModel):
+    """Request to read a file."""
+    file_path: str
+    max_size: int = 10 * 1024 * 1024  # 10MB default
+
+
+class FileReadResponse(BaseModel):
+    """Response from file read operation."""
+    success: bool
+    file_path: str
+    content: Optional[str] = None
+    size_bytes: int = 0
+    error: Optional[str] = None
+
+
+class FileMoveRequest(BaseModel):
+    """Request to move/rename a file."""
+    src_path: str
+    dst_path: str
+    overwrite: bool = False
+
+
+class FileMoveResponse(BaseModel):
+    """Response from file move operation."""
+    success: bool
+    src_path: str
+    dst_path: str
+    error: Optional[str] = None
+
+
+class FileDeleteRequest(BaseModel):
+    """Request to delete a file."""
+    file_path: str
+
+
+class FileDeleteResponse(BaseModel):
+    """Response from file delete operation."""
+    success: bool
+    file_path: str
+    error: Optional[str] = None
+

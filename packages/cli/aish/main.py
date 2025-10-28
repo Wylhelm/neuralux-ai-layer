@@ -1115,11 +1115,10 @@ or use `/search` directly. Regular "find" commands search by filename.
 @click.version_option(version="0.1.0")
 @click.pass_context
 def cli(ctx):
-    """Neuralux AI Shell - Natural language command interface."""
+    """Neuralux AI Shell - Natural language conversational interface."""
     if ctx.invoked_subcommand is None:
-        # No subcommand provided, start interactive mode
-        # Explicitly pass defaults to avoid Click missing-args error
-        ctx.invoke(ask, query=(), execute=False, explain=False)
+        # No subcommand provided, start conversational mode (default)
+        ctx.invoke(converse)
 
 
 @cli.command()
@@ -1180,53 +1179,6 @@ def web(query, open_first, limit):
                 await shell.disconnect()
 
     asyncio.run(run())
-@click.argument("query", nargs=-1, required=False)
-@click.option("--execute", "-e", is_flag=True, help="Execute without confirmation")
-@click.option("--explain", is_flag=True, help="Explain the command instead")
-def ask(query, execute, explain):
-    """Ask for a command or explanation."""
-    if not query:
-        # Interactive mode
-        shell = AIShell()
-        
-        async def run():
-            if await shell.connect():
-                try:
-                    # Prefer bound method
-                    if hasattr(shell, "interactive_mode") and callable(getattr(shell, "interactive_mode")):
-                        await shell.interactive_mode()  # type: ignore
-                    else:
-                        # Fallback: call module-level function interactive_mode(self)
-                        try:
-                            await globals().get("interactive_mode")(shell)  # type: ignore
-                        except Exception:
-                            raise AttributeError("Interactive mode entry not found")
-                finally:
-                    await shell.disconnect()
-        
-        asyncio.run(run())
-    else:
-        # Single query mode
-        query_text = " ".join(query)
-        shell = AIShell()
-        
-        async def run():
-            if await shell.connect():
-                try:
-                    mode = "explain" if explain else "command"
-                    response = await shell.ask_llm(query_text, mode=mode)
-                    
-                    if explain:
-                        md = Markdown(response)
-                        console.print(md)
-                    else:
-                        console.print(response)
-                        if execute:
-                            await shell._execute_command(response)
-                finally:
-                    await shell.disconnect()
-        
-        asyncio.run(run())
 
 
 @cli.command()
@@ -2779,7 +2731,24 @@ def overlay(hotkey: bool, tray: bool, toggle: bool, show: bool, hide: bool):
 
         threading.Thread(target=_worker, daemon=True).start()
 
-    app = OverlayApplication(config=config, on_command=on_command)
+    # Create message bus connection for conversation handler
+    overlay_message_bus = None
+    try:
+        import asyncio
+        loop = asyncio.new_event_loop()
+        
+        async def _init_bus():
+            bus = MessageBusClient(NeuraluxConfig())
+            await bus.connect()
+            return bus
+        
+        overlay_message_bus = loop.run_until_complete(_init_bus())
+        console.print("[green]✓ Message bus connected for conversational mode[/green]")
+    except Exception as e:
+        console.print(f"[yellow]Warning: Could not connect message bus for conversational mode: {e}[/yellow]")
+        console.print("[yellow]Traditional overlay mode will work, but conversational mode will be unavailable.[/yellow]")
+
+    app = OverlayApplication(config=config, on_command=on_command, message_bus=overlay_message_bus)
 
     # Optional tray integration
     tray_instance = None
@@ -3351,6 +3320,32 @@ def assistant(continuous, duration, language, wake_word, silence_duration, silen
             await shell.disconnect()
     
     asyncio.run(run())
+
+
+@cli.command()
+def converse():
+    """
+    Enter enhanced conversational mode with multi-step workflow support.
+    
+    Features:
+    - Contextual memory across turns
+    - Multi-step action planning
+    - Reference resolution ("it", "that file", etc.)
+    - File operations (create, write, move)
+    - Image generation and saving
+    
+    Example workflows:
+      > create a file named todo.txt
+      > write a list of 5 project ideas in it
+      > generate an image of a futuristic city
+      > save it to my Pictures folder
+    """
+    # Import from same directory
+    import sys
+    from pathlib import Path
+    sys.path.insert(0, str(Path(__file__).parent))
+    from conversational_mode import main as converse_main
+    asyncio.run(converse_main())
 
 
 def main():
