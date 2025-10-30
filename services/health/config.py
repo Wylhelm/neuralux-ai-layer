@@ -13,7 +13,9 @@ class HealthServiceConfig(BaseSettings):
     host: str = "0.0.0.0"
     
     # Collection intervals (seconds)
-    collection_interval: int = 5  # Collect metrics every 5 seconds
+    collection_interval: int = 30  # Collect metrics every 30 seconds (reduced from 5s to save CPU)
+    idle_collection_interval: int = 60  # When system is idle, collect less frequently
+    idle_threshold: float = 20.0  # System is considered idle if CPU < 20%
     
     # Storage
     db_path: Path = Path(__file__).parent.parent.parent / "data" / "health.duckdb"

@@ -170,8 +170,13 @@ class HealthService:
         )
     
     async def start_collection(self):
-        """Start periodic metrics collection."""
-        logger.info("Starting metrics collection", interval=self.config.collection_interval)
+        """Start periodic metrics collection with adaptive intervals."""
+        logger.info(
+            "Starting metrics collection",
+            active_interval=self.config.collection_interval,
+            idle_interval=self.config.idle_collection_interval,
+            idle_threshold=self.config.idle_threshold
+        )
         
         while True:
             try:
@@ -194,10 +199,19 @@ class HealthService:
                         message=alert.message
                     )
                 
+                # Adaptive interval: if system is idle, collect less frequently
+                cpu_usage = metrics.cpu.usage_percent
+                if cpu_usage < self.config.idle_threshold:
+                    sleep_interval = self.config.idle_collection_interval
+                    logger.debug("System idle, using longer interval", cpu=cpu_usage, interval=sleep_interval)
+                else:
+                    sleep_interval = self.config.collection_interval
+                
             except Exception as e:
                 logger.error("Error in collection loop", error=str(e))
+                sleep_interval = self.config.collection_interval
             
-            await asyncio.sleep(self.config.collection_interval)
+            await asyncio.sleep(sleep_interval)
     
     async def start_cleanup(self):
         """Start periodic cleanup of old data."""

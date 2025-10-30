@@ -30,8 +30,10 @@ class MetricsCollector:
     def collect_cpu_metrics(self) -> CPUMetrics:
         """Collect CPU metrics."""
         try:
-            cpu_percent = psutil.cpu_percent(interval=0.1)
+            # Collect per-core first (includes overall) - more efficient than two separate calls
             per_core = psutil.cpu_percent(interval=0.1, percpu=True)
+            # Calculate overall from per-core average instead of separate blocking call
+            cpu_percent = sum(per_core) / len(per_core) if per_core else 0.0
             load_avg = os.getloadavg() if hasattr(os, 'getloadavg') else [0.0, 0.0, 0.0]
             
             cpu_stats = psutil.cpu_stats()
