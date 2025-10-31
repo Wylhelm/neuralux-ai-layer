@@ -1,5 +1,6 @@
 """GTK4-based overlay window."""
 
+import asyncio
 import gi
 
 gi.require_version("Gtk", "4.0")
@@ -995,6 +996,11 @@ class OverlayWindow(Gtk.ApplicationWindow):
     def _init_conversation_handler(self):
         """Initialize the conversation handler."""
         try:
+            # Subscribe to agent suggestions
+            if self._message_bus:
+                loop = asyncio.get_event_loop()
+                loop.create_task(self._message_bus.subscribe("agent.suggestion", self._handle_suggestion))
+
             if not self._message_bus:
                 logger.warning("Cannot initialize conversation handler: no message bus")
                 self._conversation_mode_enabled = False
@@ -1496,6 +1502,58 @@ class OverlayWindow(Gtk.ApplicationWindow):
         """Callback for conversation errors."""
         logger.error("Conversation error", error=str(error))
         self.show_toast(f"Error: {error}")
+
+    async def _handle_suggestion(self, suggestion):
+        """Handle incoming suggestions from the agent."""
+        if not isinstance(suggestion, dict):
+            return
+
+        title = suggestion.get("title") or "Suggestion"
+        message = suggestion.get("message") or ""
+        actions = suggestion.get("actions") or []
+
+        def _render():
+            lines = [f"{title}"]
+            if message:
+                lines.append(message)
+            if isinstance(actions, list) and actions:
+                lines.append("")
+                for idx, action in enumerate(actions, 1):
+                    label = action.get("label") or f"Option {idx}"
+                    command = action.get("command")
+                    if command:
+                        lines.append(f"{idx}. {label} → {command}")
+                    else:
+                        lines.append(f"{idx}. {label}")
+
+            toast_text = "\n".join(lines)
+            try:
+                self.show_toast(toast_text, 6000)
+            except Exception:
+                logger.exception("Failed to show agent suggestion toast")
+
+            try:
+                if getattr(self, "conversation_history", None):
+                    history_lines = [f"🧠 {title}"]
+                    if message:
+                        history_lines.append(message)
+                    if isinstance(actions, list) and actions:
+                        history_lines.append("")
+                        for idx, action in enumerate(actions, 1):
+                            label = action.get("label") or f"Option {idx}"
+                            command = action.get("command")
+                            if command:
+                                history_lines.append(f"{idx}. {label} → {command}")
+                            else:
+                                history_lines.append(f"{idx}. {label}")
+                    history_text = "\n".join([line for line in history_lines if line])
+                    self.conversation_history.add_assistant_message(history_text)
+            except Exception:
+                logger.exception("Failed to append agent suggestion to history")
+
+            return False
+
+        GLib.idle_add(_render)
 
     # Dialogs -------------------------------------------------------------
 

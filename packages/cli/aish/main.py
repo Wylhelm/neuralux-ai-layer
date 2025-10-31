@@ -4,6 +4,7 @@ import asyncio
 import os
 import subprocess
 import sys
+import getpass
 from pathlib import Path
 from typing import Optional
 
@@ -415,6 +416,17 @@ Current context:
         except Exception as e:
             return {"type": "error", "content": f"Failed to get system health: {e}", "needs_approval": False}
 
+    async def handle_suggestion(self, suggestion: dict):
+        """Handle incoming suggestions from the agent."""
+        import subprocess
+        subprocess.run([
+            "notify-send",
+            "--app-name=NeuraluxAgent",
+            "--icon=utilities-terminal",
+            suggestion['title'],
+            suggestion['message']
+        ])
+
     def _should_chat(self, text: str) -> bool:
         """Heuristic to decide if input should be handled as natural chat."""
         t = (text or "").strip().lower()
@@ -722,6 +734,34 @@ Current context:
         console.print("\n[bold]Explanation:[/bold]")
         console.print(Panel(md, border_style="blue"))
 
+    async def record_command_event(
+        self,
+        command: str,
+        exit_code: int,
+        cwd: Optional[str] = None,
+        user: Optional[str] = None,
+    ) -> None:
+        """Publish a command execution event to the temporal service."""
+        if not command or self.message_bus is None:
+            return
+
+        payload = {
+            "event_type": "command",
+            "command": command,
+            "cwd": cwd or self.context.get("cwd") or os.getcwd(),
+            "exit_code": exit_code,
+            "user": user or self.context.get("user") or getpass.getuser(),
+        }
+
+        try:
+            await self.message_bus.publish("temporal.command.new", payload)
+        except Exception as exc:  # pragma: no cover - best-effort logging
+            logger.warning(
+                "cli_command_event_failed",
+                command=command,
+                error=str(exc),
+            )
+
 
 @click.group(invoke_without_command=True)
 @click.version_option(version="0.1.0")
@@ -884,6 +924,42 @@ def status():
                     console.print("[yellow]⚠[/yellow] Audio service: Unexpected status")
         except:
             console.print("[red]✗[/red] Audio service: Not running")
+
+        # Check temporal service
+        try:
+            import httpx
+            async with httpx.AsyncClient() as client:
+                response = await client.get("http://localhost:8007/", timeout=5.0)
+                if response.status_code == 200:
+                    console.print("[green]✓[/green] Temporal service: Running")
+                else:
+                    console.print("[yellow]⚠[/yellow] Temporal service: Unexpected status")
+        except:
+            console.print("[red]✗[/red] Temporal service: Not running")
+
+        # Check agent service
+        try:
+            import httpx
+            async with httpx.AsyncClient() as client:
+                response = await client.get("http://localhost:8008/", timeout=5.0)
+                if response.status_code == 200:
+                    console.print("[green]✓[/green] Agent service: Running")
+                else:
+                    console.print("[yellow]⚠[/yellow] Agent service: Unexpected status")
+        except:
+            console.print("[red]✗[/red] Agent service: Not running")
+
+        # Check system service
+        try:
+            import httpx
+            async with httpx.AsyncClient() as client:
+                response = await client.get("http://localhost:8009/", timeout=5.0)
+                if response.status_code == 200:
+                    console.print("[green]✓[/green] System service: Running")
+                else:
+                    console.print("[yellow]⚠[/yellow] System service: Unexpected status")
+        except:
+            console.print("[red]✗[/red] System service: Not running")
     
     asyncio.run(run())
 
@@ -1761,6 +1837,11 @@ def overlay(hotkey: bool, tray: bool, toggle: bool, show: bool, hide: bool):
                                     capture_output=True,
                                     text=True,
                                     timeout=30,
+                                    cwd=os.getcwd(),
+                                )
+                                await shell.record_command_event(
+                                    cmd,
+                                    result.returncode,
                                     cwd=os.getcwd(),
                                 )
                                 out = (result.stdout or "").strip()
@@ -2885,7 +2966,13 @@ def assistant(continuous, duration, language, wake_word, silence_duration, silen
                                 timeout=30,
                                 cwd=shell.context['cwd']
                             )
-                            
+
+                            await shell.record_command_event(
+                                pending_command,
+                                result.returncode,
+                                cwd=os.getcwd(),
+                            )
+
                             output = result.stdout.strip()
                             error = result.stderr.strip()
                             
@@ -2941,6 +3028,20 @@ def assistant(continuous, duration, language, wake_word, silence_duration, silen
     
     asyncio.run(run())
 
+
+@cli.command()
+def agent():
+    """Run the agent listener in the background."""
+    shell = AIShell()
+
+    async def run():
+        if await shell.connect():
+            console.print("[bold green]Agent listener started.[/bold green]")
+            await shell.message_bus.subscribe("agent.suggestion", shell.handle_suggestion)
+            while True:
+                await asyncio.sleep(1)
+
+    asyncio.run(run())
 
 @cli.command()
 def converse():

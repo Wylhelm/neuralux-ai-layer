@@ -304,6 +304,10 @@ COMMAND EXECUTION (for file/system operations):
 7. command_execute - Execute ANY shell command
    params: command (str)
    needs_approval: true (ALWAYS)
+
+8. system_command - Execute a system action via the system service
+   params: action (str), payload (dict)
+   needs_approval: true (ALWAYS)
    
    Common commands:
    - Create file: touch filename OR echo "content" > filename

@@ -16,6 +16,7 @@ from .result_cards import (
     WebSearchCard,
     ImageGenerationCard,
     LLMGenerationCard,
+    SystemCommandCard,
 )
 
 logger = structlog.get_logger(__name__)
@@ -205,6 +206,8 @@ class ConversationHistoryWidget(Gtk.Box):
                     "tokens": details.get("tokens", 0),
                     "generation_time": details.get("generation_time", 0),
                 })
+            elif action_type == "system_command":
+                widget = SystemCommandCard(details)
             
             if widget is None:
                 widget = ActionResultCard(action_result)
@@ -313,4 +316,3 @@ class ConversationHistoryWidget(Gtk.Box):
     def has_messages(self) -> bool:
         """Check if there are any messages."""
         return len(self.messages) > 0
-

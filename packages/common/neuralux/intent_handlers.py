@@ -355,6 +355,52 @@ Current context:
             "needs_approval": False
         }
     
+    async def handle_system_command(self, user_input: str, params: Dict) -> Dict[str, Any]:
+        """
+        Handle system command requests.
+        
+        Generates system actions that need user approval before execution.
+        """
+        # Simple parsing for now, can be improved with LLM later
+        lower_input = user_input.lower()
+        action = None
+        
+        if "list" in lower_input and "process" in lower_input:
+            action = "process.list"
+            payload = {}
+        elif ("kill" in lower_input or "terminate" in lower_input) and "process" in lower_input:
+            action = "process.kill"
+            # Extract PID, simple regex for now
+            import re
+            match = re.search(r'\d+', user_input)
+            if match:
+                pid = int(match.group(0))
+                payload = {"pid": pid}
+            else:
+                return {
+                    "type": "error",
+                    "content": "Could not find a PID to kill in your request.",
+                    "needs_approval": False
+                }
+        else:
+            return {
+                "type": "error",
+                "content": "Sorry, I don't understand that system command.",
+                "needs_approval": False
+            }
+
+        return {
+            "type": "system_command_approval",
+            "content": f"Request to {action} with parameters {payload}",
+            "explanation": f"System command for: {user_input}",
+            "needs_approval": True,
+            "pending_action": {
+                "type": "system_command",
+                "action": action,
+                "payload": payload
+            }
+        }
+
     def _format_context(self, context: Any) -> str:
         """Format context into a string for prompts."""
         # Handle case where context_getter returns a string
@@ -431,6 +477,9 @@ class IntentRouter:
             elif intent == IntentType.IMAGE_GEN:
                 result = await self.handlers.handle_image_generation(user_input, params)
             
+            elif intent == IntentType.SYSTEM_COMMAND:
+                result = await self.handlers.handle_system_command(user_input, params)
+
             else:
                 # For other types (web_search, file_search, etc.), return info for caller to handle
                 # since they need access to specific services
@@ -453,4 +502,3 @@ class IntentRouter:
                 "content": f"I encountered an error processing that: {e}",
                 "needs_approval": False
             }
-

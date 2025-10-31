@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Callable
 from enum import Enum
 import shlex
+import getpass
 
 import structlog
 
@@ -115,6 +116,8 @@ class ActionOrchestrator:
                 result = await self._execute_web_search(action, context)
             elif action.action_type == ActionType.COMMAND_EXECUTE:
                 result = await self._execute_command(action, context)
+            elif action.action_type == ActionType.SYSTEM_COMMAND:
+                result = await self._execute_system_command(action, context)
             else:
                 result = ActionResult(
                     action_type=action.action_type,
@@ -196,6 +199,18 @@ class ActionOrchestrator:
         elif action.action_type == ActionType.COMMAND_EXECUTE:
             # Try to update context based on common shell operations
             command = details.get("command", "") or ""
+            exit_code = details.get("returncode")
+
+            if command:
+                context.set_variable("last_command", command)
+            if exit_code is not None:
+                context.set_variable("last_command_exit_code", exit_code)
+            stdout = details.get("stdout")
+            if stdout:
+                context.set_variable("last_command_stdout", stdout[:8192])
+            stderr = details.get("stderr")
+            if stderr:
+                context.set_variable("last_command_stderr", stderr[:8192])
             if not command:
                 return
             try:
@@ -260,6 +275,39 @@ class ActionOrchestrator:
                 dst = _expand(args[-1])
                 context.set_variable("last_created_file", dst)
     
+    async def _publish_command_event(
+        self,
+        command: str,
+        exit_code: int,
+        context: ConversationContext,
+    ) -> None:
+        """Publish a command execution event to the temporal service."""
+        if not self.message_bus:
+            return
+
+        cwd = context.working_directory or context.get_variable("working_directory")
+        if not cwd:
+            cwd = str(Path.home())
+
+        user = getattr(context, "user_id", None) or getpass.getuser()
+
+        payload = {
+            "event_type": "command",
+            "command": command,
+            "cwd": cwd,
+            "exit_code": exit_code,
+            "user": user,
+        }
+
+        try:
+            await self.message_bus.publish("temporal.command.new", payload)
+        except Exception as exc:  # pragma: no cover - best-effort logging
+            logger.warning(
+                "command_event_publish_failed",
+                command=command,
+                error=str(exc),
+            )
+
     async def _execute_document_query(self, action: Action, context: ConversationContext) -> ActionResult:
         """Execute document query using indexed filesystem."""
         query = action.params.get("query") or action.params.get("search")
@@ -630,7 +678,13 @@ class ActionOrchestrator:
                 )
             
             success = result.returncode == 0
-            
+
+            await self._publish_command_event(
+                command=command,
+                exit_code=result.returncode,
+                context=context,
+            )
+
             return ActionResult(
                 action_type=ActionType.COMMAND_EXECUTE,
                 timestamp=time.time(),
@@ -652,3 +706,42 @@ class ActionOrchestrator:
                 error=f"Command execution failed: {e}",
             )
 
+    async def _execute_system_command(self, action: Action, context: ConversationContext) -> ActionResult:
+        """Execute a system command via the system service."""
+        action_name = action.params.get("action")
+        payload = action.params.get("payload", {})
+
+        if not action_name:
+            return ActionResult(
+                action_type=ActionType.SYSTEM_COMMAND,
+                timestamp=time.time(),
+                success=False,
+                error="Missing action name for system command",
+            )
+
+        try:
+            subject = f"system.action.{action_name}"
+            response = await self.message_bus.request(subject, payload, timeout=10.0)
+
+            if response.get("error"):
+                return ActionResult(
+                    action_type=ActionType.SYSTEM_COMMAND,
+                    timestamp=time.time(),
+                    success=False,
+                    error=response["error"],
+                    details=response,
+                )
+
+            return ActionResult(
+                action_type=ActionType.SYSTEM_COMMAND,
+                timestamp=time.time(),
+                success=True,
+                details=response,
+            )
+        except Exception as e:
+            return ActionResult(
+                action_type=ActionType.SYSTEM_COMMAND,
+                timestamp=time.time(),
+                success=False,
+                error=f"System command execution failed: {e}",
+            )

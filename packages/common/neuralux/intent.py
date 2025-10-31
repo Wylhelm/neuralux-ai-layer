@@ -18,6 +18,7 @@ class IntentType(str, Enum):
     WEB_SEARCH = "web_search"
     FILE_SEARCH = "file_search"
     SYSTEM_QUERY = "system_query"
+    SYSTEM_COMMAND = "system_command"
     OCR_REQUEST = "ocr_request"
     IMAGE_GEN = "image_gen"
     CONVERSATION = "conversation"
@@ -163,6 +164,17 @@ class IntentClassifier:
                 "parameters": {},
                 "reasoning": "System health pattern",
                 "needs_approval": False
+            }
+        
+        # System command patterns
+        system_command_patterns = ["list processes", "show processes", "kill process", "terminate process"]
+        if any(pattern in lower for pattern in system_command_patterns):
+            return {
+                "intent": IntentType.SYSTEM_COMMAND,
+                "confidence": 0.95,
+                "parameters": {"action": user_input},
+                "reasoning": "System command pattern",
+                "needs_approval": True
             }
         
         # OCR requests
@@ -377,7 +389,10 @@ IMPORTANT DISTINCTIONS:
 7. **system_query**: User wants system status/health information
    - "check system health", "CPU usage", "memory status", "disk space"
 
-8. **ocr_request**: User wants OCR/vision
+8. **system_command**: User wants to perform a system action like managing processes.
+   - "list running processes", "kill process 1234"
+
+9. **ocr_request**: User wants OCR/vision
    - "OCR window", "read text from screen", "extract text from image"
 
 9. **image_gen**: User wants to generate an image
@@ -483,7 +498,8 @@ User input: {user_input}
             result["needs_approval"] = intent in [
                 IntentType.COMMAND_REQUEST,
                 IntentType.WEB_SEARCH,
-                IntentType.FILE_SEARCH
+                IntentType.FILE_SEARCH,
+                IntentType.SYSTEM_COMMAND
             ]
             
             # Ensure confidence is valid
@@ -542,4 +558,3 @@ User input: {user_input}
                 "reasoning": "Fallback: unclear intent",
                 "needs_approval": False
             }
-

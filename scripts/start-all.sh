@@ -62,7 +62,7 @@ start_service() {
 }
 
 # Core services
-for svc in llm filesystem health vision audio; do
+for svc in llm filesystem health vision audio temporal agent system; do
   start_service "$svc"
 done
 
@@ -75,5 +75,3 @@ echo "  tail -f $LOG_DIR/*         # View service logs"
 echo "  ./scripts/stop-all.sh      # Stop everything"
 echo ""
 echo "Tip: Use 'make start-all' and 'make stop-all' as shortcuts."
-
-

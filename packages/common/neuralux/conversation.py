@@ -29,6 +29,7 @@ class ActionType(str, Enum):
     
     # Generic command execution (for all file/system operations)
     COMMAND_EXECUTE = "command_execute"
+    SYSTEM_COMMAND = "system_command"
 
 
 @dataclass
@@ -328,4 +329,3 @@ class ReferenceResolver:
             resolved_values["generated_text"] = last_generated_text
         
         return resolved_text, resolved_values
-

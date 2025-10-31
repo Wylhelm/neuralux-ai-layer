@@ -27,7 +27,7 @@ stop_service() {
   fi
 }
 
-for svc in llm filesystem health vision audio; do
+for svc in llm filesystem health vision audio temporal agent system; do
   stop_service "$svc"
 done
 
@@ -35,5 +35,3 @@ echo "📦 Stopping infrastructure (docker compose down)..."
 docker compose down || true
 
 echo "✅ All services and infrastructure stopped."
-
-

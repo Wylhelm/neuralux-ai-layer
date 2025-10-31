@@ -1,7 +1,7 @@
 """Conversational mode with multi-step workflow support."""
 
 import asyncio
-from typing import Optional
+from typing import Optional, Dict, Any
 import structlog
 from rich.console import Console
 from rich.panel import Panel
@@ -50,6 +50,9 @@ class ConversationalMode:
                 approval_callback=self._approval_callback,
             )
             
+            # Subscribe to agent suggestions
+            await self.message_bus.subscribe("agent.suggestion", self._handle_suggestion)
+            
             return True
         except Exception as e:
             console.print(f"[red]Failed to connect: {e}[/red]")
@@ -59,6 +62,39 @@ class ConversationalMode:
         """Disconnect from message bus."""
         if self.message_bus:
             await self.message_bus.disconnect()
+
+    async def _handle_suggestion(self, suggestion: Dict[str, Any]):
+        """Handle incoming suggestions from the agent."""
+        if not isinstance(suggestion, dict):
+            return
+
+        title = suggestion.get("title") or "Suggestion"
+        message = suggestion.get("message") or ""
+        actions = suggestion.get("actions") or []
+
+        body_lines = []
+        if message:
+            body_lines.append(message)
+
+        if isinstance(actions, list) and actions:
+            body_lines.append("")
+            for idx, action in enumerate(actions, 1):
+                label = action.get("label") or f"Option {idx}"
+                command = action.get("command")
+                if command:
+                    body_lines.append(f"{idx}. [cyan]{label}[/cyan] → `{command}`")
+                else:
+                    body_lines.append(f"{idx}. [cyan]{label}[/cyan]")
+
+        panel_body = "\n".join(body_lines) if body_lines else "No additional details."
+
+        console.print(
+            Panel(
+                panel_body,
+                title=f"🧠 {title}",
+                border_style="yellow",
+            )
+        )
     
     def _approval_callback(self, action) -> bool:
         """Ask user for approval of an action."""
@@ -110,8 +146,19 @@ Type `help` for commands, `/reset` to clear context, or `exit` to quit.
         while self.running:
             try:
                 # Get user input
-                user_input = console.input("\n[bold cyan]You:[/bold cyan] ").strip()
-                
+                try:
+                    loop = asyncio.get_running_loop()
+                    user_input = await loop.run_in_executor(
+                        None,
+                        console.input,
+                        "\n[bold cyan]You:[/bold cyan] ",
+                    )
+                    user_input = (user_input or "").strip()
+                except (KeyboardInterrupt, EOFError):
+                    self.running = False
+                    console.print("[green]Goodbye! 👋[/green]")
+                    break
+
                 if not user_input:
                     continue
                 
@@ -384,6 +431,29 @@ Type `help` for commands, `/reset` to clear context, or `exit` to quit.
                             console.print(f"\n[dim]Tip: To open a link, say 'open link 1' or 'visit site 2'[/dim]")
                         else:
                             console.print("[yellow]No results found.[/yellow]")
+
+                    # Show system command results in a nice format
+                    if action_type == "system_command":
+                        if "processes" in details:
+                            from rich.table import Table
+                            table = Table(show_header=True, header_style="bold cyan")
+                            table.add_column("PID", style="dim", width=10)
+                            table.add_column("User", style="green", width=15)
+                            table.add_column("CPU %", justify="right", width=10)
+                            table.add_column("Mem %", justify="right", width=10)
+                            table.add_column("Name", style="cyan")
+
+                            for p in details["processes"]:
+                                table.add_row(
+                                    str(p.get("pid")),
+                                    p.get("username"),
+                                    f"{p.get('cpu_percent', 0.0):.2f}",
+                                    f"{p.get('memory_percent', 0.0):.2f}",
+                                    p.get("name"),
+                                )
+                            console.print(table)
+                        elif "status" in details:
+                            console.print(f"  [dim]Status: {details['status']}[/dim]")
     
     async def _show_history(self):
         """Show conversation history."""
@@ -507,4 +577,3 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
-

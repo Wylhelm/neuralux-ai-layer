@@ -13,7 +13,9 @@ Neuralux AI Layer integrates advanced AI capabilities directly into your Linux s
 - ✅ **Image generation** - AI-powered image creation with Flux models
 - ✅ **OCR and vision** - Extract text from images and screens
 - ✅ **Conversational Intelligence** ✨ - Multi-step workflows with contextual memory
-- 🚧 Gesture and advanced GUI interactions (Phase 2/3)
+- ✨ **Proactive Assistance** - AI anticipates your needs and offers help
+- ✨ **System Automation** - AI can perform system-level actions on your behalf
+- 🚧 Gesture and advanced GUI interactions (Planned)
 - ✅ **Privacy-first, local-first processing** - Your data stays on your machine
 
 ## Demo Video
@@ -45,7 +47,15 @@ Neuralux uses a microservices architecture with:
 - **System Integration**: File system intelligence, health monitoring, process management
 - **User Interfaces**: CLI, GUI, Voice, Gesture
 
-## ✨ New: Conversational Intelligence
+## ✨ New: Proactive Intelligence & System Control
+
+Neuralux is now a proactive companion that anticipates your needs. By observing system events, it can offer contextual assistance.
+
+- **Temporal Intelligence**: A new background service securely records a timeline of system activity (file changes, application usage).
+- **Proactive Agent**: An intelligent agent analyzes this timeline in real-time to detect patterns. For example, after you clone a Git repository, the agent will offer to inspect it and install dependencies.
+- **System Control**: The AI now has the ability to perform system-level actions, such as managing processes, enabling more complex automations in the future.
+
+## Conversational Intelligence
 
 Experience natural, multi-step conversations with AI:
 
@@ -345,7 +355,9 @@ neuralux-ai-layer/
 │   ├── health/        # System health monitoring
 │   ├── audio/         # Audio processing (STT/TTS) ✅
 │   ├── vision/        # Computer vision (OCR + Image Gen) ✅
-│   └── system/        # System intelligence (Phase 2)
+│   ├── temporal/      # System event timeline ✅
+│   ├── agent/         # Proactive agent ✅
+│   └── system/        # System control actions ✅
 ├── packages/          # Installable packages
 │   ├── cli/          # Command line interface (aish)
 │   ├── common/       # Shared utilities
@@ -360,49 +372,24 @@ neuralux-ai-layer/
 
 ## Development Status
 
-**Current Phase**: 🚧 Phase 2A - Intelligence (In Progress)
+**Current Phase**: ✅ Phase 3 - Proactivity (Complete)
 
 ### Phase 1 - Foundation ✅ Complete
-- [x] Message bus infrastructure (NATS with JetStream)
-- [x] LLM service (llama.cpp backend with GPU support)
-- [x] CLI interface (aish - natural language commands)
-- [x] Semantic file search (vector-based content search)
-- [x] Docker Compose orchestration
-- [x] Configuration management
-- [x] One-command installation script
-- [x] Comprehensive documentation
+- [x] Core message bus, LLM service, and CLI
+- [x] Semantic file search
+- [x] Docker orchestration and installation script
 
-### Phase 2A - Intelligence ✅ Complete (16/16 tasks)
-- [x] System health monitoring (CPU, memory, disk, network)
-- [x] Real-time metrics collection with psutil
-- [x] Time-series storage with DuckDB
-- [x] Anomaly detection and alerting
-- [x] NATS API endpoints for health queries
-- [x] Beautiful terminal dashboard (`aish health`)
-- [x] Live monitoring mode (`aish health --watch`)
-- [x] System tray integration
-- [x] Desktop packaging
-- [x] GUI overlay (Alt+Space assistant)
-- [x] Command palette with fuzzy search
-- [x] Global hotkey listener (X11)
-- [x] LLM integration in GUI
-- [x] Screen context awareness (minimal)
+### Phase 2 - Intelligence ✅ Complete
+- [x] System health monitoring service and dashboard
+- [x] GUI overlay assistant with hotkey and tray support
+- [x] Voice interface (STT/TTS)
+- [x] Vision service (OCR and Image Generation)
+- [x] Conversational intelligence for multi-step tasks
 
-### Phase 2B - Advanced Intelligence 🚧 In Progress (3/4 tasks)
-- [x] Voice interface (STT/TTS) ✅
-  - Speech-to-text with faster-whisper
-  - Text-to-speech with Piper
-  - Voice activity detection with Silero
-  - CLI commands: `aish listen`, `aish speak`
-- [x] Vision service (OCR + Image Generation) ✅ **NEW!**
-  - OCR with PaddleOCR (CLI and overlay)
-  - Image generation with Flux AI models (FLUX.1-schnell, FLUX.1-dev, SDXL-Lightning)
-  - 8-bit quantization for VRAM efficiency
-  - Real-time progress streaming via SSE
-  - Overlay integration with 🎨 button
-  - Quick actions: Save, Copy to clipboard, Continue chat
-- [ ] Temporal intelligence (system history)
-- [ ] Enhanced automation
+### Phase 3 - Proactivity ✅ Complete
+- [x] **Temporal Intelligence**: New `temporal` service records a timeline of system events (filesystem, snapshots).
+- [x] **Proactive Agent**: New `agent` service analyzes the event stream, detects patterns, and sends desktop notifications with suggestions.
+- [x] **System Control**: New `system` service exposes atomic system actions (e.g., process management) over NATS for future automation.
 
 ### Additional Docs
 
@@ -449,4 +436,3 @@ Apache 2.0 - See LICENSE file for details
 ## Contributing
 
 Contributions welcome! Please read CONTRIBUTING.md for guidelines.
-
