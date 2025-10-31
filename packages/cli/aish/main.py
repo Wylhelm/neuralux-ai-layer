@@ -65,7 +65,9 @@ class AIShell:
 
     async def ocr(self, file_path: Optional[str] = None, region: Optional[str] = None, window: bool = False, language: Optional[str] = None) -> dict:
         """Run OCR via vision service. Region format: x,y,w,h. Window best-effort via screengrab."""
+        logger.info("Starting OCR process", region=region, window=window, file_path=file_path)
         if not self.message_bus:
+            logger.error("OCR failed: not connected to message bus")
             return {"error": "Not connected to message bus"}
 
         img_b64: Optional[str] = None
@@ -75,9 +77,11 @@ class AIShell:
         else:
             # Capture region or window to image bytes
             try:
+                logger.info("Importing screen capture libraries")
                 from mss import mss  # type: ignore
                 import numpy as np  # type: ignore
                 from PIL import Image  # type: ignore
+                logger.info("Screen capture libraries imported")
 
                 with mss() as sct:
                     monitor = sct.monitors[1]  # primary monitor
@@ -112,7 +116,9 @@ class AIShell:
                         except Exception:
                             return {"error": "Invalid region format. Use x,y,w,h"}
                     # TODO: window capture best-effort can be added later; for now region/fullscreen
+                    logger.info("Grabbing screen region", bbox=bbox)
                     shot = sct.grab(bbox)
+                    logger.info("Screen region grabbed")
                     img = Image.frombytes("RGB", shot.size, shot.rgb)
                     import base64
                     from io import BytesIO
@@ -120,14 +126,18 @@ class AIShell:
                     img.save(buf, format="PNG")
                     img_b64 = base64.b64encode(buf.getvalue()).decode()
             except Exception as e:
+                logger.error("Screen capture failed", error=str(e))
                 return {"error": f"Screen capture failed: {e}"}
             request = {"image_bytes_b64": img_b64, "language": language}
 
         try:
+            logger.info("Sending OCR request to vision service")
             # NATS request path
             response = await self.message_bus.request("ai.vision.ocr.request", request, timeout=20.0)
+            logger.info("Received OCR response from vision service")
             return response
         except Exception as e:
+            logger.error("OCR request to vision service failed", error=str(e))
             return {"error": str(e)}
     
     async def connect(self):
@@ -699,217 +709,6 @@ Current context:
         except Exception:
             return []
     
-    async def interactive_mode(self):
-        """Run in interactive mode."""
-        console.print(Panel.fit(
-            "[bold cyan]Neuralux AI Shell[/bold cyan]\n"
-            "Natural language command interface\n\n"
-            "Commands:\n"
-            "  /explain <command> - Explain a command\n"
-            "  /search <query> - Search files\n"
-            "  /web <query> - Search the web\n"
-            "  /mode chat|command - Switch interaction style\n"
-            "  /help - Show help\n"
-            "  /exit - Exit the shell\n"
-            "  Ctrl+C - Cancel current operation",
-            border_style="cyan"
-        ))
-        
-        while True:
-            try:
-                user_input = Prompt.ask("\n[bold green]aish[/bold green]").strip()
-                
-                if not user_input:
-                    continue
-                
-                # Handle special commands
-                if user_input == "/exit":
-                    break
-                elif user_input == "/help":
-                    self._show_help()
-                    continue
-                elif user_input.startswith("/explain "):
-                    command = user_input[9:]
-                    await self._explain_command(command)
-                    continue
-                elif user_input.startswith("/search "):
-                    search_query = user_input[8:]
-                    await self._search_files_interactive(search_query)
-                    continue
-                elif user_input.startswith("/web "):
-                    q = user_input[5:].strip()
-                    with console.status("[bold yellow]Searching web...[/bold yellow]"):
-                        results = await self.web_search(q, num_results=5)
-                    if not results:
-                        console.print("[yellow]No results found or search unavailable[/yellow]")
-                    else:
-                        table = Table(title=f"Web results for: {q}")
-                        table.add_column("#", justify="right", no_wrap=True)
-                        table.add_column("Title")
-                        table.add_column("URL")
-                        table.add_column("Summary")
-                        for i, r in enumerate(results, 1):
-                            table.add_row(str(i), r.get("title", ""), r.get("url", ""), (r.get("snippet", "") or "")[:160])
-                        console.print(table)
-                        if Confirm.ask("\nOpen top result in browser?", default=False):
-                            url = results[0].get("url")
-                            if url:
-                                subprocess.Popen(["xdg-open", url])
-                    continue
-                elif user_input.startswith("/mode "):
-                    mode = user_input.split(None, 1)[1].strip().lower()
-                    if mode in ("chat", "command"):
-                        self.chat_mode = mode
-                        console.print(f"[green]Mode set to {mode}[/green]")
-                    else:
-                        console.print("[yellow]Usage: /mode chat|command[/yellow]")
-                    continue
-                elif user_input.startswith("/"):
-                    console.print(f"[red]Unknown command: {user_input}[/red]")
-                    continue
-                
-                # Detect file search queries (semantic)
-                search_keywords = [
-                    "find files", "search files", "locate files", 
-                    "files about", "files containing", "files with",
-                    "find document", "search document", "locate document",
-                    "document about", "document containing", "document with",
-                    "find the document", "find the file",
-                    "documents about", "documents containing",
-                ]
-                is_search_query = any(keyword in user_input.lower() for keyword in search_keywords)
-                
-                if is_search_query:
-                    await self._search_files_interactive(user_input)
-                    continue
-                
-                # Detect natural web search phrasing
-                lower = user_input.lower()
-                if any(kw in lower for kw in ["search the web for ", "search the web ", "web search ", "google ", "search online "]):
-                    q = lower
-                    for p in ["search the web for ", "search the web ", "web search ", "google ", "search online "]:
-                        q = q.replace(p, "")
-                    with console.status("[bold yellow]Searching web...[/bold yellow]"):
-                        results = await self.web_search(q.strip(), num_results=5)
-                    if not results:
-                        console.print("[yellow]No results found or search unavailable[/yellow]")
-                    else:
-                        table = Table(title=f"Web results for: {q.strip()}")
-                        table.add_column("#", justify="right", no_wrap=True)
-                        table.add_column("Title")
-                        table.add_column("URL")
-                        table.add_column("Summary")
-                        for i, r in enumerate(results, 1):
-                            table.add_row(str(i), r.get("title", ""), r.get("url", ""), (r.get("snippet", "") or "")[:160])
-                        console.print(table)
-                        if Confirm.ask("\nOpen top result in browser?", default=False):
-                            url = results[0].get("url")
-                            if url:
-                                subprocess.Popen(["xdg-open", url])
-                    continue
-
-                # Process with intent system
-                with console.status("[bold yellow]Thinking...[/bold yellow]"):
-                    result = await self.process_with_intent(
-                        user_input,
-                        context={"chat_mode": self.chat_mode == "chat"}
-                    )
-                
-                # Handle result based on type
-                result_type = result.get("type")
-                
-                if result_type == "text":
-                    # Simple text response
-                    content = result.get("content", "")
-                    md = Markdown(content)
-                    console.print("\n[bold]Assistant:[/bold]")
-                    console.print(Panel(md, border_style="blue"))
-                
-                elif result_type == "command_approval":
-                    # Command needs approval
-                    command = result.get("content", "")
-                    # Clean markdown code blocks
-                    command = command.strip()
-                    if command.startswith('```'):
-                        lines = command.split('\n')
-                        lines = [l for l in lines if not l.strip().startswith('```')]
-                        command = '\n'.join(lines).strip()
-                    
-                    console.print("\n[bold]Suggested command:[/bold]")
-                    syntax = Syntax(command, "bash", theme="monokai", line_numbers=False)
-                    console.print(syntax)
-                    
-                    logger.debug("Waiting for user approval", command=command[:50])
-                    if Confirm.ask("\nExecute this command?", default=False):
-                        logger.debug("User approved, executing command")
-                        await self._execute_command(command)
-                    else:
-                        console.print("[yellow]Command not executed[/yellow]")
-                
-                elif result_type == "search_results":
-                    # Display search results
-                    subtype = result.get("subtype")
-                    content = result.get("content", [])
-                    
-                    if subtype == "web":
-                        if not content:
-                            console.print("[yellow]No web results found[/yellow]")
-                        else:
-                            table = Table(title=f"Web Search Results")
-                            table.add_column("#", justify="right", no_wrap=True)
-                            table.add_column("Title")
-                            table.add_column("URL")
-                            table.add_column("Summary")
-                            for i, r in enumerate(content, 1):
-                                table.add_row(str(i), r.get("title", ""), r.get("url", ""), (r.get("snippet", "") or "")[:160])
-                            console.print(table)
-                            
-                            if Confirm.ask("\nOpen top result in browser?", default=False):
-                                url = content[0].get("url")
-                                if url:
-                                    subprocess.Popen(["xdg-open", url])
-                    
-                    elif subtype == "files":
-                        if not content:
-                            console.print("[yellow]No files found[/yellow]")
-                        else:
-                            table = Table(title="File Search Results")
-                            table.add_column("File")
-                            table.add_column("Score", justify="right")
-                            for item in content[:10]:
-                                table.add_row(item.get("file_path", ""), f"{item.get('score', 0):.2f}")
-                            console.print(table)
-                            
-                            if content and Confirm.ask("\nOpen top result?", default=False):
-                                path = content[0].get("file_path")
-                                if path:
-                                    subprocess.Popen(["xdg-open", path])
-                
-                elif result_type == "system_health":
-                    # Display system health
-                    health_data = result.get("content", {})
-                    console.print("\n[bold]System Health:[/bold]")
-                    console.print(Panel(str(health_data), border_style="green"))
-                
-                elif result_type == "image_generation":
-                    # Image generation request
-                    prompt = result.get("prompt", result.get("content", ""))
-                    console.print(f"\n[cyan]Image generation: {prompt}[/cyan]")
-                    console.print("[yellow]Tip: Use the overlay GUI for image generation with preview![/yellow]")
-                
-                elif result_type == "error":
-                    console.print(f"[red]Error: {result.get('content')}[/red]")
-                
-                else:
-                    console.print(f"[yellow]Unhandled result type: {result_type}[/yellow]")
-                    
-            except KeyboardInterrupt:
-                console.print("\n[yellow]Cancelled[/yellow]")
-                continue
-            except EOFError:
-                break
-        
-        console.print("\n[cyan]Goodbye![/cyan]")
     
     async def _explain_command(self, command: str):
         """Explain a command."""
@@ -922,193 +721,6 @@ Current context:
         md = Markdown(explanation)
         console.print("\n[bold]Explanation:[/bold]")
         console.print(Panel(md, border_style="blue"))
-    
-    def _extract_search_query(self, query: str) -> str:
-        """Extract the actual search terms from a natural language query."""
-        import re
-        
-        # Remove common search command phrases
-        patterns = [
-            r'^find\s+(the\s+)?(file|files|document|documents)\s+(about|containing|with|on)\s+',
-            r'^search\s+(for\s+)?(file|files|document|documents)\s+(about|containing|with|on)\s+',
-            r'^locate\s+(the\s+)?(file|files|document|documents)\s+(about|containing|with|on)\s+',
-            r'^(find|search|locate)\s+(the\s+)?(file|files|document|documents)\s+',
-            r'^(document|documents|file|files)\s+(about|containing|with|on)\s+',
-        ]
-        
-        cleaned = query.lower().strip()
-        for pattern in patterns:
-            cleaned = re.sub(pattern, '', cleaned, flags=re.IGNORECASE)
-        
-        # If we removed everything, use the original query
-        if not cleaned or len(cleaned) < 2:
-            return query
-        
-        return cleaned.strip()
-    
-    async def _search_files_interactive(self, query: str):
-        """Search files and display results interactively."""
-        # Extract the actual search terms from natural language
-        extracted_query = self._extract_search_query(query)
-        
-        with console.status(f"[bold yellow]Searching for: {extracted_query}...[/bold yellow]"):
-            result = await self.search_files(extracted_query)
-        
-        if "error" in result:
-            error = result["error"]
-            if "Connection refused" in error or "not found" in error.lower():
-                console.print("\n[yellow]⚠ Filesystem service not running[/yellow]")
-                console.print("\n[bold]To enable file search:[/bold]")
-                console.print("1. Start the filesystem service:")
-                console.print("   cd services/filesystem && python service.py &")
-                console.print("\n2. Index your files:")
-                console.print("   aish index ~/Documents")
-            else:
-                console.print(f"\n[red]Error: {error}[/red]")
-            return
-        
-        results = result.get("results", [])
-        
-        if not results:
-            console.print(f"\n[yellow]No files found matching: {extracted_query}[/yellow]")
-            console.print("\n[bold]Tips:[/bold]")
-            console.print("- Make sure files are indexed: aish index ~/path/to/directory")
-            console.print("- Try different search terms")
-            console.print("- Check that files contain text content")
-            return
-        
-        console.print(f"\n[bold]Found {len(results)} files:[/bold]\n")
-        
-        for i, res in enumerate(results, 1):
-            score_pct = int(res["score"] * 100)
-            console.print(f"[bold cyan]{i}.[/bold cyan] [bold]{res['filename']}[/bold] (Score: {score_pct}%)")
-            console.print(f"   Path: {res['file_path']}")
-            console.print(f"   {res['snippet'][:150]}...")
-            console.print("")
-        
-        # Ask if user wants to open a file
-        if Confirm.ask("\nOpen a file?", default=False):
-            try:
-                file_num = int(Prompt.ask("Which file? (number)"))
-                if 1 <= file_num <= len(results):
-                    file_path = results[file_num - 1]["file_path"]
-                    # Try to open with xdg-open
-                    import subprocess
-                    subprocess.run(["xdg-open", file_path])
-                    console.print(f"[green]✓ Opened {file_path}[/green]")
-            except (ValueError, KeyboardInterrupt):
-                pass
-    
-    async def _execute_command(self, command: str):
-        """Execute a shell command with real-time output streaming."""
-        console.print("\n[bold]Executing...[/bold]")
-        logger.debug("Starting command execution", command=command[:100])
-        
-        # Clean up command - join multiple lines with && if needed
-        command = command.strip()
-        if '\n' in command:
-            # Multiple commands - join with &&
-            commands = [c.strip() for c in command.split('\n') if c.strip()]
-            command = ' && '.join(commands)
-        
-        try:
-            # Use Popen for real-time output streaming
-            process = subprocess.Popen(
-                command,
-                shell=True,
-                cwd=self.context['cwd'],
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
-                bufsize=1,  # Line buffered
-            )
-            
-            logger.debug("Process started", pid=process.pid)
-            
-            # Stream output in real-time
-            stdout_lines = []
-            stderr_lines = []
-            
-            try:
-                # Read stdout
-                if process.stdout:
-                    for line in process.stdout:
-                        console.print(line, end='')
-                        stdout_lines.append(line)
-                
-                # Wait for process to complete
-                returncode = process.wait(timeout=30)
-                
-                # Read any stderr
-                if process.stderr:
-                    stderr_output = process.stderr.read()
-                    if stderr_output:
-                        console.print(f"[red]{stderr_output}[/red]")
-                        stderr_lines.append(stderr_output)
-                
-                if returncode != 0:
-                    console.print(f"[red]Command failed with exit code {returncode}[/red]")
-                else:
-                    console.print("[green]✓ Command completed successfully[/green]")
-                
-                logger.debug("Command completed", returncode=returncode)
-                
-            except subprocess.TimeoutExpired:
-                logger.warning("Command timeout, killing process")
-                process.kill()
-                console.print(f"[red]Command timed out after 30 seconds[/red]")
-        
-        except Exception as e:
-            logger.error("Command execution error", error=str(e), command=command[:100])
-            console.print(f"[red]Error executing command: {e}[/red]")
-    
-    def _show_help(self):
-        """Show help information."""
-        help_text = """
-# Neuralux AI Shell Help
-
-## Usage Examples
-
-**Find files:**
-- "show me large files in my downloads folder"
-- "find python files modified today"
-
-**System monitoring:**
-- "what's using the most CPU?"
-- "show disk usage"
-- "check memory usage"
-
-**File operations:**
-- "copy all images to backup folder"
-- "rename all txt files to md"
-
-**Development:**
-- "start a python http server"
-- "find all TODOs in my code"
-
-**Explain commands:**
-- `/explain tar -xzf archive.tar.gz`
-- `/explain ps aux | grep python`
-
-**Search files by content (semantic search):**
-- "find the document about Claude"
-- "document containing gemini"
-- "search files with budget information"
-- `/search python code examples`
-- `/search machine learning notes`
-
-**Note:** For content search, use phrases like "document about", "document containing", 
-or use `/search` directly. Regular "find" commands search by filename.
-
-## Tips
-
-1. **Index first:** Run `aish index ~/Documents` before searching content
-2. Be specific about what you want
-3. Commands are shown before execution for safety
-4. Use `/explain` to understand complex commands
-5. Context-aware: knows your current directory and git status
-"""
-        console.print(Markdown(help_text))
 
 
 @click.group(invoke_without_command=True)
@@ -2560,7 +2172,7 @@ def overlay(hotkey: bool, tray: bool, toggle: bool, show: bool, hide: bool):
                 def _update():
                     if not app.window:
                         return False
-                    app.window.clear_results()
+                    app.window.conversation_history.clear_history()
                     # Always sync TTS toggle state and clear recording indicator
                     try:
                         app.window.set_tts_enabled(state["tts_enabled"])  # reflect latest state
@@ -2702,26 +2314,9 @@ def overlay(hotkey: bool, tray: bool, toggle: bool, show: bool, hide: bool):
                         # Set conversational context from OCR
                         state["context_text"] = text
                         state["context_kind"] = "ocr"
-                        app.window.add_result("OCR Result", text)
-                        # Buttons for common actions
-                        if hasattr(app.window, "add_buttons_row"):
-                            app.window.add_buttons_row(
-                                "Quick actions",
-                                [
-                                    ("Copy", "/copy"),
-                                    ("Summarize", "/summarize"),
-                                    ("Translate EN", "/translate en"),
-                                    ("Translate FR", "/translate fr"),
-                                    ("Extract table", "/extract"),
-                                ],
-                            )
-                            app.window.add_buttons_row(
-                                "Session",
-                                [
-                                    ("Continue chat", "/start_chat"),
-                                    ("Start fresh", "/fresh"),
-                                ],
-                            )
+                        app.window.conversation_history.add_assistant_message(f"**OCR Result:**\n{text}")
+                        # The new UI uses slash commands in the entry box instead of button rows.
+                        # The user can type /copy, /summarize, etc.
                     elif isinstance(result, dict) and result.get("_overlay_render") == "image_gen_request":
                         # Image generation request - trigger image generation directly
                         prompt = result.get("prompt", "")
@@ -2738,11 +2333,11 @@ def overlay(hotkey: bool, tray: bool, toggle: bool, show: bool, hide: bool):
                                 app.window.add_result("Tip", "Click the 🎨 button in the toolbar to generate images")
                                 is_image_gen = False
                         except Exception as e:
-                            app.window.add_result("Image Generation", f"Prompt: {prompt}")
-                            app.window.add_result("Error", f"Could not start image generation: {e}")
+                            app.window.conversation_history.add_assistant_message(f"**Image Generation Prompt:**\n{prompt}")
+                            app.window.conversation_history.add_assistant_message(f"**Error:**\nCould not start image generation: {e}")
                             is_image_gen = False
                     else:
-                        app.window.add_result("Result", result if isinstance(result, str) else str(result))
+                        app.window.conversation_history.add_assistant_message(str(result))
                     
                     # Stop spinner for all cases except successful image generation
                     if not (isinstance(result, dict) and result.get("_overlay_render") == "image_gen_request" and 'is_image_gen' in locals() and is_image_gen):
@@ -2760,7 +2355,6 @@ def overlay(hotkey: bool, tray: bool, toggle: bool, show: bool, hide: bool):
     # Create message bus connection for conversation handler
     overlay_message_bus = None
     try:
-        import asyncio
         loop = asyncio.new_event_loop()
         
         async def _init_bus():
@@ -3381,4 +2975,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

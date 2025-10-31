@@ -11,8 +11,11 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional, Tuple
 
 import importlib
+import structlog
 
 from PIL import Image
+
+logger = structlog.get_logger(__name__)
 
 
 class OCRProcessor:
@@ -66,6 +69,7 @@ class OCRProcessor:
 
         # Try PaddleOCR
         if self._ensure_paddle(language):
+            logger.info("Attempting OCR with PaddleOCR")
             try:
                 # PaddleOCR expects numpy array (BGR) or path; convert appropriately
                 import numpy as np  # type: ignore
@@ -73,8 +77,11 @@ class OCRProcessor:
                 np_img = np.array(image)
                 # Convert RGB -> BGR
                 np_img = np_img[:, :, ::-1]
+                logger.info("Calling PaddleOCR engine")
                 result = self._paddle_engine.ocr(np_img, cls=True)
+                logger.info("PaddleOCR engine returned")
                 # result is a list per image; we passed one image
+                result = result or [] # Ensure result is a list
                 lines: List[str] = []
                 words: List[str] = []
                 confidences: List[float] = []
@@ -96,7 +103,8 @@ class OCRProcessor:
                     "words": words or None,
                     "engine": "paddleocr",
                 }
-            except Exception:
+            except Exception as e:
+                logger.error("PaddleOCR failed", error=str(e))
                 # Fall through to Tesseract
                 pass
 
@@ -166,5 +174,3 @@ class OCRProcessor:
             "engine": None,
             "error": "No OCR engine available (install paddleocr or tesseract)",
         }
-
-

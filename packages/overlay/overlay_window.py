@@ -12,7 +12,7 @@ import structlog
 from .config import OverlayConfig
 from .search import suggest, Suggestion
 from .voice_handler import VoiceHandler
-from .dialogs import AboutDialog, SettingsDialog, ImageGenerationManager
+from .dialogs import AboutDialog, SettingsDialog
 from .conversation import (
     OverlayConversationHandler,
     ConversationHistoryWidget,
@@ -45,7 +45,7 @@ class OverlayWindow(Gtk.ApplicationWindow):
 
         # Conversation handler (initialized later if message_bus available)
         self.conversation_handler: Optional[OverlayConversationHandler] = None
-        self._conversation_mode_enabled = False
+        self._conversation_mode_enabled = True
         self._pending_approval_dialog = None
         self._pending_approval_widget = None
         self._pending_approval_handlers = (
@@ -185,16 +185,6 @@ class OverlayWindow(Gtk.ApplicationWindow):
             pass
         controls_box.append(self.ocr_select_button)
 
-        # Conversation mode toggle button
-        self.conversation_toggle_button = Gtk.Button(label="💬")
-        self.conversation_toggle_button.set_tooltip_text("Toggle conversational mode")
-        try:
-            self.conversation_toggle_button.connect(
-                "clicked", self._on_conversation_toggle
-            )
-        except Exception:
-            pass
-        controls_box.append(self.conversation_toggle_button)
 
         # Refresh button
         self.refresh_button = Gtk.Button(label="↻")
@@ -205,52 +195,20 @@ class OverlayWindow(Gtk.ApplicationWindow):
             pass
         controls_box.append(self.refresh_button)
 
-        # Image generation button
-        self.image_gen_button = Gtk.Button(label="🎨")
-        self.image_gen_button.set_tooltip_text("Generate image with AI (/generate)")
-        try:
-            self.image_gen_button.connect("clicked", self._on_image_gen_clicked)
-        except Exception:
-            pass
-        controls_box.append(self.image_gen_button)
-
         main_box.append(controls_box)
 
         # Search entry
         self.search_entry = Gtk.Entry()
-        self.search_entry.set_placeholder_text("Type a command or question...")
+        self.search_entry.set_placeholder_text("Type your message...")
         self.search_entry.set_size_request(-1, 50)
         self.search_entry.connect("activate", self._on_entry_activate)
-        self.search_entry.connect("changed", self._on_entry_changed)
         main_box.append(self.search_entry)
 
-        # Create stack for switching between results list and conversation view
-        self.view_stack = Gtk.Stack()
-        self.view_stack.set_vexpand(True)
-        self.view_stack.set_margin_top(10)
-
-        # Results list (scrollable) - Traditional mode
-        scrolled = Gtk.ScrolledWindow()
-        scrolled.set_size_request(-1, 400)
-        scrolled.set_vexpand(True)
-        scrolled.get_style_context().add_class("results-scroller")
-
-        # List box for results
-        self.results_list = Gtk.ListBox()
-        self.results_list.set_selection_mode(Gtk.SelectionMode.SINGLE)
-        self.results_list.connect("row-activated", self._on_result_activated)
-        scrolled.set_child(self.results_list)
-
-        self.view_stack.add_named(scrolled, "results")
-
-        # Conversation history widget - Conversational mode
+        # Conversation history widget
         self.conversation_history = ConversationHistoryWidget()
-        self.view_stack.add_named(self.conversation_history, "conversation")
-
-        # Start with results view
-        self.view_stack.set_visible_child_name("results")
-
-        main_box.append(self.view_stack)
+        self.conversation_history.set_vexpand(True)
+        self.conversation_history.set_margin_top(10)
+        main_box.append(self.conversation_history)
 
         # Status bar at bottom with spinner
         status_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
@@ -287,9 +245,6 @@ class OverlayWindow(Gtk.ApplicationWindow):
 
         outer.append(main_box)
         self.set_child(outer)
-
-        # Image generation mode flag
-        self._image_gen_mode = False
 
         # Drag state for moving window
         self._drag_active = False
@@ -541,20 +496,15 @@ class OverlayWindow(Gtk.ApplicationWindow):
     # ============================================================
 
     def _on_mic_clicked(self, _button):
-        """Handle mic button depending on mode (traditional vs conversational)."""
+        """Handle mic button click for conversational voice capture."""
         try:
-            if self._conversation_mode_enabled:
-                # If an approval prompt is active AND handlers exist, run short approval flow
-                approval_widget = getattr(self, "_pending_approval_widget", None)
-                approval_handlers = getattr(self, "_pending_approval_handlers", None)
-                if approval_widget is not None and approval_handlers:
-                    self._voice_approve_flow()
-                else:
-                    self._start_conversational_voice_capture()
+            # If an approval prompt is active AND handlers exist, run short approval flow
+            approval_widget = getattr(self, "_pending_approval_widget", None)
+            approval_handlers = getattr(self, "_pending_approval_handlers", None)
+            if approval_widget is not None and approval_handlers:
+                self._voice_approve_flow()
             else:
-                # Traditional (non-conversational) mode delegates to CLI handler
-                self.indicate_recording(True)
-                self.on_command("/voice")
+                self._start_conversational_voice_capture()
         except Exception:
             try:
                 self.indicate_recording(False)
@@ -570,93 +520,18 @@ class OverlayWindow(Gtk.ApplicationWindow):
         except Exception:
             pass
 
-    def _on_image_gen_clicked(self, _button):
-        """Start image generation in overlay."""
-        try:
-            self.clear_results()
-            self.search_entry.set_text("")
-            self.search_entry.set_placeholder_text(
-                "Describe the image you want to generate..."
-            )
-            self.search_entry.grab_focus()
-            self.set_status("Image generation mode - Enter your prompt and press Enter")
-            # Set a flag for image gen mode
-            self._image_gen_mode = True
-        except Exception:
-            pass
-
     def _on_entry_activate(self, entry):
         """Handle Enter key in search entry."""
         text = entry.get_text().strip()
         if text:
-            # Check if in image generation mode
-            if getattr(self, "_image_gen_mode", False):
-                self._generate_image_inline(text)
-                self._image_gen_mode = False
-                entry.set_placeholder_text("Type a command or question...")
-            # Check if in conversation mode
-            elif self._conversation_mode_enabled and self.conversation_handler:
+            # Always use conversational input processing
+            if self.conversation_handler:
                 self._process_conversational_input(text)
             else:
-                self.on_command(text)
+                # Fallback if handler is not ready
+                self.show_toast("Conversation handler not ready.")
             entry.set_text("")
 
-    def _on_entry_changed(self, entry):
-        """Handle text changes in search entry."""
-        text = entry.get_text()
-        logger.debug("Search text changed", text=text)
-        self.clear_results()
-        for s in suggest(
-            text,
-            max_results=self.config.max_results,
-            threshold=self.config.fuzzy_threshold,
-        ):
-            self._add_suggestion_row(s)
-
-    def _on_result_activated(self, list_box, row):
-        """Handle selection of a result."""
-        idx = row.get_index()
-        child = row.get_child()
-        payload = getattr(child, "payload", None)
-        logger.debug("Result activated", row_index=idx)
-        if payload and isinstance(payload, dict):
-            # Dispatch to command handler via status bar prompt
-            try:
-                action_type = payload.get("type")
-                if action_type == "llm_query":
-                    self.on_command(payload.get("query", ""))
-                elif action_type == "file_search":
-                    # Prefix to drive filesystem search via CLI backend
-                    self.on_command(f"/search {payload.get('query', '')}")
-                elif action_type == "health_summary":
-                    # Ask health via CLI backend
-                    self.on_command("/health")
-                elif action_type == "open":
-                    # Queue an approval to open the file
-                    path = payload.get("path", "")
-                    if path:
-                        self.on_command(f"/queue_open {path}")
-                elif action_type == "overlay_command":
-                    # Run a raw overlay command string (e.g., /copy, /summarize)
-                    cmd = payload.get("command", "").strip()
-                    if cmd:
-                        self.on_command(cmd)
-                elif action_type == "sequence":
-                    # Run a sequence of commands in order (best-effort)
-                    cmds = payload.get("commands") or []
-                    try:
-                        for c in cmds:
-                            if isinstance(c, str) and c.strip():
-                                self.on_command(c)
-                    except Exception:
-                        pass
-                elif action_type == "ocr_action":
-                    # Dispatch to run OCR via CLI backend
-                    self.on_command("/ocr window")
-                else:
-                    self.on_command(str(payload))
-            except Exception:
-                pass
 
     def _on_close_request(self, window):
         """Handle window close request."""
@@ -904,140 +779,8 @@ class OverlayWindow(Gtk.ApplicationWindow):
         self.voice_handler.speak(text)
 
     # ============================================================
-    # RESULTS DISPLAY
+    # RESULTS DISPLAY (CONVERSATIONAL)
     # ============================================================
-
-    def add_result(
-        self, title: str, subtitle: str = "", payload: Optional[dict] = None
-    ):
-        """Add a result to the list.
-        Optionally attach a payload dict to make the row actionable.
-        """
-        row = Gtk.ListBoxRow()
-
-        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
-
-        title_label = Gtk.Label()
-        title_label.set_markup(f"<b>{title}</b>")
-        title_label.set_halign(Gtk.Align.START)
-        title_label.get_style_context().add_class("result-title")
-        box.append(title_label)
-
-        if subtitle:
-            # Use a selectable, wrapping label for content
-            subtitle_label = Gtk.Label()
-            subtitle_label.set_selectable(True)
-            subtitle_label.set_wrap(True)
-            subtitle_label.set_xalign(0.0)
-            subtitle_label.set_text(subtitle)
-            subtitle_label.get_style_context().add_class("result-content")
-            box.append(subtitle_label)
-
-        if payload and isinstance(payload, dict):
-            setattr(box, "payload", payload)
-
-        row.set_child(box)
-        self.results_list.append(row)
-
-    def show_pending_action(self, title: str, summary: str = ""):
-        """Show a pending action row with Approve/Cancel buttons."""
-        # Insert a row with buttons
-        row = Gtk.ListBoxRow()
-        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
-
-        title_label = Gtk.Label()
-        title_label.set_markup(f"<b>{title}</b>")
-        title_label.set_halign(Gtk.Align.START)
-        box.append(title_label)
-
-        if summary:
-            summary_label = Gtk.Label()
-            summary_label.set_wrap(True)
-            summary_label.set_xalign(0.0)
-            summary_label.set_text(summary)
-            summary_label.get_style_context().add_class("result-content")
-            box.append(summary_label)
-
-        buttons = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-        approve = Gtk.Button(label="Approve")
-        cancel = Gtk.Button(label="Cancel")
-        try:
-            approve.connect("clicked", lambda _b: self.on_command("/approve"))
-            cancel.connect("clicked", lambda _b: self.on_command("/cancel"))
-        except Exception:
-            pass
-        try:
-            approve.get_style_context().add_class("approve")
-            cancel.get_style_context().add_class("cancel")
-        except Exception:
-            pass
-        buttons.append(approve)
-        buttons.append(cancel)
-        box.append(buttons)
-
-        row.set_child(box)
-        self.results_list.append(row)
-
-    def _add_suggestion_row(self, s: Suggestion):
-        row = Gtk.ListBoxRow()
-        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
-
-        title_label = Gtk.Label()
-        title_label.set_markup(
-            f"<b>{Gtk.utils.escape(s.title)}</b>"
-            if hasattr(Gtk, "utils")
-            else f"<b>{s.title}</b>"
-        )
-        title_label.set_halign(Gtk.Align.START)
-        title_label.get_style_context().add_class("result-title")
-        box.append(title_label)
-
-        if s.subtitle:
-            subtitle_label = Gtk.Label()
-            subtitle_label.set_selectable(False)
-            subtitle_label.set_wrap(True)
-            subtitle_label.set_xalign(0.0)
-            subtitle_label.set_text(s.subtitle)
-            subtitle_label.get_style_context().add_class("result-content")
-            box.append(subtitle_label)
-
-        # Attach payload to the box for retrieval on activation
-        setattr(box, "payload", s.payload)
-        row.set_child(box)
-        self.results_list.append(row)
-
-    def clear_results(self):
-        """Clear all results."""
-        while True:
-            row = self.results_list.get_row_at_index(0)
-            if row is None:
-                break
-            self.results_list.remove(row)
-
-    def add_buttons_row(self, title: str, buttons: list[tuple[str, str]]):
-        """Add a row with a title and a horizontal list of clickable buttons.
-        Each button is defined as (label, command_string) and will dispatch via on_command.
-        """
-        row = Gtk.ListBoxRow()
-        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
-
-        title_label = Gtk.Label()
-        title_label.set_markup(f"<b>{title}</b>")
-        title_label.set_halign(Gtk.Align.START)
-        box.append(title_label)
-
-        btn_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
-        for label, cmd in buttons:
-            btn = Gtk.Button(label=label)
-            try:
-                btn.connect("clicked", lambda _b, c=cmd: self.on_command(c))
-            except Exception:
-                pass
-            btn_box.append(btn)
-        box.append(btn_box)
-
-        row.set_child(box)
-        self.results_list.append(row)
 
     # ============================================================
     # STATUS & UI UPDATES
@@ -1286,7 +1029,7 @@ class OverlayWindow(Gtk.ApplicationWindow):
     def _on_refresh_clicked(self, button):
         """Handle refresh button click."""
         try:
-            if self._conversation_mode_enabled and self.conversation_handler:
+            if self.conversation_handler:
                 # Clear any pending approval UI/state first
                 try:
                     if getattr(self, "_pending_approval_widget", None):
@@ -1312,45 +1055,10 @@ class OverlayWindow(Gtk.ApplicationWindow):
                 self.show_toast("✨ Conversation reset!")
                 self.set_status("Ready")
                 logger.info("Conversation reset via refresh button")
-            else:
-                # In traditional mode, refresh suggestions
-                self.on_command("/refresh")
-                self.show_toast("Refreshed")
         except Exception as e:
             logger.error("Failed to handle refresh", error=str(e))
             self.show_toast("Reset failed")
 
-    def _on_conversation_toggle(self, button):
-        """Toggle between conversation mode and traditional mode."""
-        try:
-            self._conversation_mode_enabled = not self._conversation_mode_enabled
-
-            if self._conversation_mode_enabled:
-                # Switch to conversation view
-                self.view_stack.set_visible_child_name("conversation")
-                self.conversation_toggle_button.set_label("📋")
-                self.conversation_toggle_button.set_tooltip_text(
-                    "Switch to traditional mode"
-                )
-                self.search_entry.set_placeholder_text("Type your message...")
-                self.set_status("Conversational mode active")
-                self.show_toast("Conversational mode enabled")
-
-                # Load existing history if available
-                if self.conversation_handler:
-                    self._load_conversation_history()
-            else:
-                # Switch to results view
-                self.view_stack.set_visible_child_name("results")
-                self.conversation_toggle_button.set_label("💬")
-                self.conversation_toggle_button.set_tooltip_text(
-                    "Switch to conversational mode"
-                )
-                self.search_entry.set_placeholder_text("Type a command or question...")
-                self.set_status("Traditional mode active")
-                self.show_toast("Traditional mode enabled")
-        except Exception as e:
-            logger.error("Failed to toggle conversation mode", error=str(e))
 
     def _load_conversation_history(self):
         """Load conversation history into the view."""
@@ -1515,8 +1223,6 @@ class OverlayWindow(Gtk.ApplicationWindow):
                                             "command_execute": "Command executed successfully",
                                             "web_search": "Web search completed successfully",
                                             "document_query": "File search completed successfully",
-                                            "image_generate": "Picture generated successfully",
-                                            "image_save": "Image saved successfully",
                                             "ocr_capture": "Text extracted successfully",
                                         }
 
@@ -1812,19 +1518,6 @@ class OverlayWindow(Gtk.ApplicationWindow):
             self.end_busy,
             self.show_toast,
             self.set_status,
-        )
-
-    def _generate_image_inline(self, prompt: str):
-        """Generate image and display in overlay results area."""
-        ImageGenerationManager.generate_and_display(
-            prompt,
-            self,
-            self.clear_results,
-            self.add_result,
-            self.begin_busy,
-            self.end_busy,
-            self.show_toast,
-            self.results_list,
         )
 
 

@@ -59,6 +59,7 @@ class VisionService:
         prefix = self.config.nats_subject_prefix
 
         async def _ocr_handler(data: dict) -> dict:
+            logger.info("Received OCR request")
             try:
                 req = OCRRequest(**data)
                 img: Optional[Image.Image] = None
@@ -76,7 +77,9 @@ class VisionService:
                 else:
                     return {"error": "No image provided"}
 
+                logger.info("Calling OCR backend")
                 result = self.ocr.run(img, language=req.language)
+                logger.info("OCR backend returned", result_keys=list(result.keys()) if isinstance(result, dict) else None)
                 if result.get("error"):
                     return {"error": result.get("error")}
                 response = OCRResponse(
@@ -91,6 +94,7 @@ class VisionService:
                     pass
                 return response
             except Exception as e:
+                logger.error("OCR handler failed", error=str(e))
                 return {"error": str(e)}
 
         async def _image_gen_handler(data: dict) -> dict:
@@ -280,5 +284,3 @@ if __name__ == "__main__":
     service.app.add_event_handler("shutdown", shutdown)
 
     uvicorn.run(service.app, host=service.config.host, port=service.config.service_port, log_level="info")
-
-

@@ -675,9 +675,18 @@ Now plan the actions for the user's request."""
         
         # Pattern: OCR
         elif "ocr" in lower_input or "extract text" in lower_input:
+            params = {}
+            if "window" in lower_input:
+                params["window"] = True
+            elif "region" in lower_input:
+                # Try to extract region, e.g., "from region 100,100,200,50"
+                match = re.search(r"region\s+([\d,]+)", lower_input)
+                if match:
+                    params["region"] = match.group(1)
+            
             actions.append(Action(
                 action_type=ActionType.OCR_CAPTURE,
-                params={},
+                params=params,
                 description="Capture text from screen",
                 needs_approval=False,
             ))
@@ -727,4 +736,3 @@ Now plan the actions for the user's request."""
         if action.action_type == ActionType.IMAGE_SAVE:
             if "src_path" not in action.params and "image_path" in resolved_values:
                 action.params["src_path"] = resolved_values["image_path"]
-
