@@ -47,13 +47,31 @@ Neuralux uses a microservices architecture with:
 - **System Integration**: File system intelligence, health monitoring, process management
 - **User Interfaces**: CLI, GUI, Voice, Gesture
 
-## ✨ New: Proactive Intelligence & System Control
+## ✅ Phase 3 Complete: Proactive Intelligence & System Control
 
-Neuralux is now a proactive companion that anticipates your needs. By observing system events, it can offer contextual assistance.
+**Neuralux is now a proactive companion that anticipates your needs!** Phase 3 is fully implemented and operational.
 
-- **Temporal Intelligence**: A new background service securely records a timeline of system activity (file changes, application usage).
-- **Proactive Agent**: An intelligent agent analyzes this timeline in real-time to detect patterns. For example, after you clone a Git repository, the agent will offer to inspect it and install dependencies.
-- **System Control**: The AI now has the ability to perform system-level actions, such as managing processes, enabling more complex automations in the future.
+Three new microservices work together to provide contextual, timely assistance:
+
+- ✅ **Temporal Service (Port 8007)**: Records a complete timeline of system activity (commands, files, apps) in a local DuckDB database
+- ✅ **Agent Service (Port 8008)**: Analyzes events in real-time using pattern detection and AI to generate helpful suggestions
+- ✅ **System Service (Port 8009)**: Executes approved system actions (process management, automation)
+
+**Example**: Clone a Git repository and the agent will proactively offer to inspect dependencies and install them. All suggestions appear as desktop notifications with actionable buttons.
+
+**Try it now:**
+```bash
+# Clone a repo and watch for proactive suggestions
+aish
+> "git clone https://github.com/your/favorite-repo.git"
+# You'll get a desktop notification asking if you want to inspect dependencies!
+```
+
+📖 **New to Phase 3?** Start here:
+- **[Proactive Intelligence Overview](Documentation/PROACTIVE_INTELLIGENCE.md)** - High-level introduction
+- **[Quick Start Guide](Documentation/PHASE_3_QUICKSTART.md)** - Get started in 5 minutes
+- **[User Guide](Documentation/PHASE_3_USER_GUIDE.md)** - Complete documentation
+- **[Examples & Use Cases](Documentation/PHASE_3_EXAMPLES.md)** - 17 practical examples
 
 ## Conversational Intelligence
 
@@ -390,6 +408,11 @@ neuralux-ai-layer/
 - [x] **Temporal Intelligence**: New `temporal` service records a timeline of system events (filesystem, snapshots).
 - [x] **Proactive Agent**: New `agent` service analyzes the event stream, detects patterns, and sends desktop notifications with suggestions.
 - [x] **System Control**: New `system` service exposes atomic system actions (e.g., process management) over NATS for future automation.
+
+**Learn more:**
+- [Phase 3 User Guide](Documentation/PHASE_3_USER_GUIDE.md) - How to use proactive features
+- [Phase 3 Architecture](Documentation/PHASE_3_ARCHITECTURE.md) - Technical deep dive
+- [Implementation Details](Documentation/PHASE_3_IMPLEMENTATION.md) - Development documentation
 
 ### Additional Docs
 
