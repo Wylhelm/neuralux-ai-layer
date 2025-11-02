@@ -45,6 +45,76 @@ class ActionPlanner:
         if quick_actions:
             return quick_actions, quick_explanation
         
+        # Fast-path: music generation patterns (before LLM to avoid confusion)
+        lower_input_for_music = user_input.lower().strip()
+        music_patterns = [
+            "generate music", "generate a song", "generate song",
+            "create music", "create a song", "create song",
+            "make music", "make a song", "make song",
+            "compose music", "compose a song", "compose song"
+        ]
+        # Check if it's a music generation request (but not asking for lyrics/text)
+        is_music_request = any(pattern in lower_input_for_music for pattern in music_patterns)
+        
+        # Also catch implicit music requests like "a song about..." or "[description] song/music"
+        # Simple heuristic: if input contains "song" or "music" and is short/descriptive, likely a music request
+        implicit_music_keywords = ["song", "music", "tune", "melody", "track", "piece"]
+        has_music_keyword = any(keyword in lower_input_for_music for keyword in implicit_music_keywords)
+        is_descriptive = len(user_input.split()) <= 10  # Short descriptive phrases
+        is_not_command = not any(cmd in lower_input_for_music for cmd in ["run", "execute", "list", "show", "find", "search", "open"])
+        
+        # Check for patterns like "a song about X", "[style] music", etc.
+        implicit_music_patterns = [
+            r"^a\s+song\s+(about|of|for|with)",
+            r"^an?\s+.*\s+song\s+(about|of|for|with)",
+            r".*\s+song\s+about",
+            r".*\s+music\s+(about|of|for|with|in)",
+            r"^(medieval|rock|jazz|classical|electronic|folk|pop|metal|country|blues|hip.?hop|rap|r&b)\s+(song|music|tune)",
+        ]
+        matches_pattern = any(re.search(pattern, lower_input_for_music, re.IGNORECASE) for pattern in implicit_music_patterns)
+        
+        is_implicit_music = has_music_keyword and (matches_pattern or (is_descriptive and is_not_command))
+        
+        if (is_music_request or is_implicit_music) and "lyric" not in lower_input_for_music and "text" not in lower_input_for_music:
+            # Extract prompt - use the full input as prompt since music generation models handle descriptions well
+            prompt = user_input.strip()
+            
+            if is_music_request:
+                # Clean up common action prefixes, handling commas properly
+                # Pattern: "generate [a] song/music, [description]" or "generate [description] music"
+                prompt = re.sub(r"^(generate|create|make|compose)\s+(?:a\s+|an\s+)?(?:song|music)\s*,?\s*", "", prompt, flags=re.IGNORECASE).strip()
+                # Also handle pattern "generate [description] music" - extract description
+                if not prompt or len(prompt) < 3:
+                    # Try alternative pattern: "generate [description] music"
+                    alt_match = re.search(r"^(generate|create|make|compose)\s+(.+?)\s+(?:music|song)", lower_input_for_music, re.IGNORECASE)
+                    if alt_match and alt_match.group(2):
+                        prompt = alt_match.group(2).strip()
+            else:
+                # For implicit patterns like "a song about love", use the full input
+                # The prompt is already good as-is
+                pass
+            
+            # Ensure we have a meaningful prompt
+            if not prompt or len(prompt) < 3:
+                prompt = "an upbeat, happy song"
+            
+            # Plan both generation and save actions
+            actions = [
+                Action(
+                    action_type=ActionType.MUSIC_GENERATE,
+                    params={"prompt": prompt},
+                    description=f"Generate music: {prompt}",
+                    needs_approval=True,
+                ),
+                Action(
+                    action_type=ActionType.MUSIC_SAVE,
+                    params={"src_path": "{{last_generated_music}}", "dst_path": "~/Music"},
+                    description="Save generated music to Music folder",
+                    needs_approval=True,
+                )
+            ]
+            return actions, f"Generating music: {prompt} and saving to Music folder"
+        
         # Fast-path: informational Q&A and conversational inputs bypass planner LLM
         lower_input_for_intent = user_input.lower()
         if self._is_informational_query(lower_input_for_intent):
@@ -84,9 +154,21 @@ class ActionPlanner:
             context,
         )
         
-        # Post-process actions (add resolved values)
+        # Post-process actions (add resolved values and ensure required params)
         for action in actions:
             self._enrich_action_params(action, resolved_values, context)
+            # Fix application opening commands (xdg-open <app> -> <app> &)
+            if action.action_type == ActionType.COMMAND_EXECUTE:
+                self._fix_application_opening_command(action)
+            # Ensure music_generate actions have a prompt parameter
+            if action.action_type == ActionType.MUSIC_GENERATE and "prompt" not in action.params:
+                # Extract prompt from user input if missing
+                prompt = user_input.strip()
+                # Clean up common prefixes
+                prompt = re.sub(r"^(generate|create|make|compose)\s+(?:a\s+|an\s+)?(?:song|music)\s*,?\s*", "", prompt, flags=re.IGNORECASE).strip()
+                if not prompt or len(prompt) < 3:
+                    prompt = user_input.strip()  # Use original if cleaning removed everything
+                action.params["prompt"] = prompt
         
         logger.info("planned_actions", count=len(actions), explanation=explanation)
         return actions, explanation
@@ -167,13 +249,18 @@ Plan the required actions to fulfill this request. Respond in JSON format with:
   "explanation": "Brief explanation of what you'll do",
   "actions": [
     {{
-      "action_type": "file_create|file_write|image_generate|image_save|llm_generate|ocr_capture",
+      "action_type": "music_generate|music_save|image_generate|image_save|llm_generate|ocr_capture|command_execute|document_query|web_search",
       "params": {{}},
       "description": "What this action does",
       "needs_approval": true/false
     }}
   ]
-}}"""
+}}
+
+CRITICAL REMINDERS:
+- For music generation: use music_generate (NOT image_generate, NOT llm_generate, NOT command_execute)
+- For saving music: use music_save (NOT image_save, NOT command_execute)
+- Music is audio data, NOT text - never use echo/cat/write commands for music"""
         
         try:
             messages = [
@@ -287,7 +374,7 @@ AI-SPECIFIC ACTIONS (not shell commands):
 
 3. music_generate - Generate music with AI
    params: prompt (str), duration (int, default 30)
-   needs_approval: false
+   needs_approval: true
 
 4. music_save - Save AI-generated music to a specific location
    params: src_path (str), dst_path (str)
@@ -322,7 +409,8 @@ COMMAND EXECUTION (for file/system operations):
    - Create file: touch filename OR echo "content" > filename
    - Write to file: echo "content" > filename (overwrite) OR echo "content" >> filename (append)
    - Read text file: cat filename (for .txt, .log, etc.)
-   - Open document: xdg-open filename (for .odt, .pdf, .doc, images, etc.)
+   - Open document/file: xdg-open filename (for .odt, .pdf, .doc, images, etc.) OR xdg-open 'url' (for URLs)
+   - Open application: appname & (e.g., firefox &, chromium &) - DO NOT use xdg-open for applications!
    - Move file: mv source destination
    - Delete file: rm filename
    - Create directory: mkdir -p dirname
@@ -343,17 +431,26 @@ Path shortcuts you can use:
 - Use "Pictures" or "pictures" folder instead of full path
 - Paths will be automatically expanded
 
+CRITICAL RULES FOR MUSIC GENERATION:
+- When user says "generate music", "generate a song", "create music", "create a song", "medieval music", etc. → use `music_generate` action
+- Music files are AUDIO files (like .wav, .mp3), NOT text files
+- NEVER use `command_execute` with echo/cat/write commands for music - music is binary audio data
+- NEVER use `image_save` for music - music and images are completely different!
+- Use `music_save` (NOT `image_save`) when saving generated music
+- The `music_generate` action produces an audio file, stored in context as `last_generated_music`
+- Only chain `music_save` if user explicitly asks to save it (e.g., "and save it", "save to Music")
+
 Important rules:
 1. ALL command_execute actions ALWAYS require approval - user must see exact command
-2. AI actions (llm_generate, image_generate, ocr_capture, document_query) don't need approval
-3. When generating content for a file: llm_generate first, then command_execute with echo
+2. AI actions (llm_generate, image_generate, music_generate, ocr_capture, document_query) don't need approval
+3. When generating text content for a file: llm_generate first, then command_execute with echo
 4. Use proper shell quoting for content with special characters
 5. Chain actions: one action's output feeds into the next
 6. For image operations: use image_generate and image_save. Do not use command_execute to save generated images.
-7. For music operations: use music_generate and music_save. Do not confuse with image actions.
-8. If the user asks to "generate a song" or "generate music", you MUST use the `music_generate` action. Do NOT use `llm_generate` for lyrics unless the user explicitly asks for "lyrics".
-9. Only perform the actions the user explicitly asks for. If the user says "generate a song", do NOT save it to a file unless they also say "and save it".
-10. For `music_generate`, do NOT chain it with `command_execute` to write the output to a file. The music is not text.
+7. For music operations: use music_generate and music_save. NEVER use image_save or command_execute for music!
+8. If the user asks to "generate a song" or "generate music" (any music-related phrase), you MUST use the `music_generate` action. Do NOT use `llm_generate` unless the user explicitly asks for "lyrics" or "text".
+9. Only perform the actions the user explicitly asks for. If the user says "generate a song", do NOT save it unless they also say "and save it" or "save it".
+10. MUSIC IS NOT TEXT - do NOT use command_execute to write music to files. Music generation creates audio files directly.
 
 Examples:
 
@@ -384,6 +481,10 @@ Response: {{"explanation": "Searching web", "actions": [{{"action_type": "web_se
 User: "open link 2" or "visit site 1" (after a web search)
 Response: {{"explanation": "Opening link", "actions": [{{"action_type": "command_execute", "params": {{"command": "xdg-open 'https://example.com'"}}, "description": "Execute: xdg-open...", "needs_approval": true}}]}}
 
+User: "open firefox" or "launch chromium"
+Response: {{"explanation": "Opening application", "actions": [{{"action_type": "command_execute", "params": {{"command": "firefox &"}}, "description": "Execute: firefox &", "needs_approval": true}}]}}
+Note: Use "appname &" format for applications, NOT "xdg-open appname"!
+
 User: "generate an image of a sunset"
 Response: {{"explanation": "Generating image", "actions": [{{"action_type": "image_generate", "params": {{"prompt": "beautiful sunset over ocean"}}, "description": "Generate sunset image", "needs_approval": false}}]}}
 
@@ -398,6 +499,22 @@ Response: {{"explanation": "Generating and saving a heavy metal song", "actions"
 
 User: "a pop song about a cat"
 Response: {{"explanation": "Generating a pop song about a cat", "actions": [{{"action_type": "music_generate", "params": {{"prompt": "a pop song about a cat"}}, "description": "Generate a pop song about a cat", "needs_approval": false}}]}}
+
+User: "generate medieval music"
+Response: {{"explanation": "Generating medieval music", "actions": [{{"action_type": "music_generate", "params": {{"prompt": "medieval music"}}, "description": "Generate medieval music", "needs_approval": false}}]}}
+
+User: "generate a song, medieval style mixed with folk and rock"
+Response: {{"explanation": "Generating a song with medieval, folk, and rock styles", "actions": [{{"action_type": "music_generate", "params": {{"prompt": "a song, medieval style mixed with folk and rock"}}, "description": "Generate a song, medieval style mixed with folk and rock", "needs_approval": false}}]}}
+
+WRONG EXAMPLES - DO NOT DO THIS:
+User: "generate music"
+WRONG: {{"actions": [{{"action_type": "command_execute", "params": {{"command": "echo '' > music.txt"}}...}}]}}  ❌ NEVER use command_execute for music!
+
+User: "generate a song and save it"
+WRONG: {{"actions": [{{"action_type": "music_generate"...}}, {{"action_type": "image_save"...}}]}}  ❌ NEVER use image_save for music! Use music_save!
+
+User: "generate medieval music"
+WRONG: {{"actions": [{{"action_type": "music_generate"...}}, {{"action_type": "command_execute", "params": {{"command": "echo '' >> music.txt"}}...}}]}}  ❌ Music is not text! Don't use echo/cat for music!
 
 User: "show my docker containers"
 Response: {{"explanation": "Listing containers", "actions": [{{"action_type": "command_execute", "params": {{"command": "docker ps -a"}}, "description": "Execute: docker ps -a", "needs_approval": true}}]}}
@@ -599,18 +716,31 @@ Now plan the actions for the user's request."""
 
         # Pattern: Generate music
         elif "generate" in lower_input and ("music" in lower_input or "song" in lower_input):
-            # Extract prompt
-            prompt_match = re.search(r"(?:music|song)\s+(?:of\s+|about\s+)?(.+)", lower_input)
-            if prompt_match:
-                prompt = prompt_match.group(1).strip()
+            # Extract prompt - more flexible pattern to catch variations like "generate medieval music" or "generate a song, medieval style"
+            # Try to extract everything after "generate" and before any "and" clauses
+            prompt_match = re.search(r"generate\s+(?:a\s+|an\s+)?(?:song|music)\s*,?\s*(.+)", lower_input, re.IGNORECASE)
+            if not prompt_match:
+                # Try alternative pattern: "generate [style] music"
+                prompt_match = re.search(r"generate\s+(.+\s+)?(?:music|song)", lower_input, re.IGNORECASE)
+                if prompt_match and prompt_match.group(1):
+                    prompt = prompt_match.group(1).strip().rstrip(',')
+                else:
+                    # Use the full input as prompt
+                    prompt = user_input.strip()
             else:
+                prompt = prompt_match.group(1).strip()
+                # Remove "and save it" or similar trailing phrases
+                prompt = re.sub(r'\s+and\s+(save|store).*$', '', prompt, flags=re.IGNORECASE).strip()
+            
+            # Ensure we have a meaningful prompt
+            if not prompt or len(prompt) < 3:
                 prompt = "an upbeat, happy song"
             
             actions.append(Action(
                 action_type=ActionType.MUSIC_GENERATE,
                 params={"prompt": prompt},
                 description=f"Generate music: {prompt}",
-                needs_approval=False,
+                needs_approval=True,  # Require approval so user can see planned actions
             ))
             explanation = f"Generating music: {prompt}"
         
@@ -715,6 +845,64 @@ Now plan the actions for the user's request."""
                         ))
                         explanation = f"Opening link #{link_num}"
         
+        # Pattern: Open application (check before document pattern to avoid matching numbers)
+        # Matches: "open firefox", "open libreoffice writer", "launch chromium", etc.
+        elif ("open" in lower_input or "launch" in lower_input or "start" in lower_input):
+            # Check if it's NOT a document/file reference (no number or file-related keywords)
+            # Check if it's NOT a URL (doesn't contain http:// or https://)
+            # Check if it's NOT explicitly asking to open a file
+            has_number = bool(re.search(r'\d+', lower_input))
+            has_file_keywords = any(kw in lower_input for kw in ["document", "doc", "file", "folder", "directory", "path"])
+            has_url = "http://" in lower_input or "https://" in lower_input or "www." in lower_input
+            
+            if not has_number and not has_file_keywords and not has_url:
+                # Extract application name - everything after "open/launch/start"
+                app_match = re.search(r"(?:open|launch|start)\s+(.+)", lower_input, re.IGNORECASE)
+                if app_match:
+                    app_name = app_match.group(1).strip()
+                    # Remove common trailing phrases
+                    app_name = re.sub(r'\s+(?:application|app|program|software)\s*$', '', app_name, flags=re.IGNORECASE)
+                    
+                    # Check if it looks like a file path (has /, ~, starts with ., or has common file extension)
+                    is_file_path = (
+                        '/' in app_name or 
+                        app_name.startswith('~') or 
+                        app_name.startswith('.') or
+                        ('.' in app_name and app_name.split('.')[-1].lower() in ['txt', 'pdf', 'doc', 'docx', 'odt', 'png', 'jpg', 'jpeg', 'gif', 'svg', 'mp4', 'mp3', 'wav', 'ogg', 'zip', 'tar', 'gz'])
+                    )
+                    
+                    # If it's not a file path, treat it as an application
+                    if not is_file_path:
+                        # Special handling for LibreOffice components
+                        # "libreoffice writer" -> "libreoffice --writer"
+                        if app_name.lower().startswith("libreoffice "):
+                            component = app_name.lower().replace("libreoffice ", "").strip()
+                            # Map common component names
+                            component_map = {
+                                "writer": "--writer",
+                                "calc": "--calc",
+                                "impress": "--impress",
+                                "draw": "--draw",
+                                "math": "--math",
+                                "base": "--base",
+                            }
+                            if component in component_map:
+                                command = f"libreoffice {component_map[component]} &"
+                            else:
+                                # If component name not recognized, try it as-is with --
+                                command = f"libreoffice --{component} &"
+                        else:
+                            # Run the application in the background
+                            command = f"{app_name} &"
+                        
+                        actions.append(Action(
+                            action_type=ActionType.COMMAND_EXECUTE,
+                            params={"command": command},
+                            description=f"Execute: {command}",
+                            needs_approval=True,
+                        ))
+                        explanation = f"Opening {app_name}"
+        
         # Pattern: Open document from query results
         # Matches: "open 1", "open document 1", "show doc 2", "read 3", etc.
         elif "open" in lower_input or "show" in lower_input or "read" in lower_input:
@@ -768,6 +956,64 @@ Now plan the actions for the user's request."""
             explanation = "Processing your request"
         
         return actions, explanation
+    
+    def _fix_application_opening_command(self, action: Action):
+        """Fix commands that try to open applications using xdg-open.
+        
+        Converts 'xdg-open firefox' to 'firefox &' since xdg-open treats
+        application names as file paths.
+        """
+        if action.action_type != ActionType.COMMAND_EXECUTE:
+            return
+        
+        command = action.params.get("command", "").strip()
+        
+        # Check if it's xdg-open with an application name (not a file path or URL)
+        xdg_match = re.match(r'^xdg-open\s+([^\'"\s]+)\s*$', command)
+        if not xdg_match:
+            # Try with quotes
+            xdg_match = re.match(r'^xdg-open\s+["\']?([^"\']+)["\']?\s*$', command)
+        
+        if xdg_match:
+            target = xdg_match.group(1)
+            
+            # Heuristics to detect if it's an application vs file path/URL:
+            # - URLs: start with http:// or https://
+            # - File paths: contain / or ~ or start with . (relative path)
+            # - File paths: have file extensions like .txt, .pdf, etc.
+            # - Applications: single word or common app names
+            
+            is_url = target.startswith(('http://', 'https://', 'file://'))
+            # .desktop files can be opened with xdg-open, so treat them as file paths
+            is_file_path = (
+                '/' in target or 
+                target.startswith('~') or 
+                target.startswith('.') or
+                target.endswith('.desktop') or
+                ('.' in target and target.split('.')[-1] in ['txt', 'pdf', 'doc', 'docx', 'odt', 'png', 'jpg', 'jpeg', 'gif', 'svg', 'mp4', 'mp3', 'wav', 'ogg', 'zip', 'tar', 'gz'])
+            )
+            
+            # If it's not a URL or file path, assume it's an application
+            if not is_url and not is_file_path:
+                # Run the application directly in the background
+                app_name = target
+                new_command = f"{app_name} &"
+                action.params["command"] = new_command
+                # Update description to reflect the fix - replace the entire xdg-open command
+                if action.description:
+                    # Replace various forms of xdg-open commands
+                    action.description = re.sub(
+                        r'Execute:\s*xdg-open\s+["\']?[^"\']+["\']?',
+                        f"Execute: {new_command}",
+                        action.description
+                    )
+                    # Also try replacing without "Execute:" prefix
+                    action.description = re.sub(
+                        r'xdg-open\s+["\']?[^"\']+["\']?',
+                        new_command,
+                        action.description
+                    )
+                logger.debug("fixed_application_command", original=command, fixed=new_command)
     
     def _enrich_action_params(
         self,
