@@ -566,6 +566,36 @@ class ActionOrchestrator:
             else:
                 dst.parent.mkdir(parents=True, exist_ok=True)
             
+            # Check if source and destination are the same file/location
+            src_resolved = src.resolve()
+            dst_resolved = dst.resolve()
+            
+            if src_resolved == dst_resolved:
+                # File is already in the destination location (music service already saved it there)
+                # Just return success without copying - no need for a note
+                return ActionResult(
+                    action_type=ActionType.MUSIC_SAVE,
+                    timestamp=time.time(),
+                    success=True,
+                    details={
+                        "saved_path": str(dst_resolved),
+                        "original_path": str(src_resolved),
+                    },
+                )
+            
+            # Check if the source file is already in the destination directory
+            if src.parent.resolve() == dst.parent.resolve() and src.name == dst.name:
+                # Same directory and filename - already there, no copy needed
+                return ActionResult(
+                    action_type=ActionType.MUSIC_SAVE,
+                    timestamp=time.time(),
+                    success=True,
+                    details={
+                        "saved_path": str(src_resolved),
+                        "original_path": str(src_resolved),
+                    },
+                )
+            
             success, error = FileOperations.copy_file(src, dst, overwrite=True)
             
             return ActionResult(

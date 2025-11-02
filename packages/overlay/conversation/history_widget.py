@@ -201,10 +201,17 @@ class ConversationHistoryWidget(Gtk.Box):
                     "height": details.get("height", 0),
                     "generation_time": details.get("generation_time", 0),
                 })
-            elif action_type == "music_generate":
+            elif action_type in ["music_generate", "music_save"]:
+                # Handle both music_generate and music_save actions
+                # music_generate has file_path, music_save has saved_path
+                file_path = details.get("file_path") or details.get("saved_path", "")
+                prompt = details.get("prompt", "") or action_result.get("description", "")
+                
                 widget = MusicCard({
-                    "file_path": details.get("file_path", ""),
-                    "prompt": details.get("prompt", ""),
+                    "file_path": file_path,
+                    "saved_path": details.get("saved_path", ""),
+                    "prompt": prompt,
+                    "details": details,
                 })
             elif action_type == "llm_generate":
                 widget = LLMGenerationCard({

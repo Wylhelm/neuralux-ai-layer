@@ -1285,7 +1285,20 @@ class OverlayWindow(Gtk.ApplicationWindow):
             self.conversation_handler.process_message_async(user_input, _on_result)
             self.set_status("Processing...")
 
-            # 35s watchdog: if no result, reset conversational engine
+            # Check if this is a music generation request - use extended watchdog timeout
+            lower_input = user_input.lower()
+            is_music_request = any(phrase in lower_input for phrase in [
+                "generate music", "generate a song", "generate song",
+                "create music", "create a song", "create song",
+                "make music", "make a song", "make song",
+                "compose music", "compose a song", "compose song",
+                "song about", "music about"
+            ])
+            
+            # Extended watchdog timeout for music generation (340 seconds = 5.67 minutes)
+            watchdog_timeout = 340 if is_music_request else 35
+
+            # Watchdog: if no result, reset conversational engine
             def _watchdog():
                 try:
                     if not finished[0]:
@@ -1309,7 +1322,7 @@ class OverlayWindow(Gtk.ApplicationWindow):
                 return False
 
             try:
-                GLib.timeout_add_seconds(35, _watchdog)
+                GLib.timeout_add_seconds(watchdog_timeout, _watchdog)
             except Exception:
                 pass
 

@@ -176,7 +176,97 @@ class ConversationHandler:
             }
         
         explanation = f"Executing {len(actions_to_execute)} approved action(s)"
-        return await self._execute_actions(actions_to_execute, explanation)
+        
+        # Subscribe to conversation topic for real-time updates (for async actions like music generation)
+        response_future = asyncio.Future()
+        async def response_callback(msg):
+            if not response_future.done():
+                response_future.set_result(msg)
+
+        await self.message_bus.subscribe(f"conversation.{self.session_id}", response_callback)
+        
+        # Execute actions
+        results = await self._execute_actions(actions_to_execute, explanation)
+        
+        # Wait for a response from the service if the action was asynchronous
+        has_music_generate = any(a.action_type in [ActionType.MUSIC_GENERATE] for a in actions_to_execute)
+        has_music_save = any(a.action_type in [ActionType.MUSIC_SAVE] for a in actions_to_execute)
+        
+        if has_music_generate:
+            try:
+                music_result = await asyncio.wait_for(response_future, timeout=300.0)
+                # Process the music result and update context
+                if music_result.get("type") == "music_result":
+                    file_path = music_result.get("file_path")
+                    if file_path:
+                        self.context.set_variable("last_generated_music", file_path)
+                        # Update the executed action with the actual result
+                        for executed_action in results.get("actions_executed", []):
+                            if executed_action.get("action_type") == "music_generate":
+                                executed_action["details"]["file_path"] = file_path
+                                executed_action["details"]["status"] = "completed"
+                                executed_action["success"] = True
+                        
+                        # If we have a music_save action waiting, execute it now with the actual file path
+                        if has_music_save:
+                            save_action = next((a for a in actions_to_execute if a.action_type == ActionType.MUSIC_SAVE), None)
+                            if save_action:
+                                # Update the src_path with the actual file path
+                                if "{{last_generated_music}}" in str(save_action.params.get("src_path", "")):
+                                    save_action.params["src_path"] = file_path
+                                elif not save_action.params.get("src_path"):
+                                    save_action.params["src_path"] = file_path
+                                
+                                # Execute the save action now that we have the file path
+                                save_result = await self.orchestrator.execute_action(save_action, self.context)
+                                
+                                # Add or update the save action in results
+                                executed_actions = results.get("actions_executed", [])
+                                save_action_found = False
+                                for executed_action in executed_actions:
+                                    if executed_action.get("action_type") == "music_save":
+                                        executed_action["success"] = save_result.success
+                                        executed_action["details"] = save_result.details
+                                        executed_action["error"] = save_result.error
+                                        save_action_found = True
+                                        break
+                                
+                                # If not found, add it (in case it was skipped earlier)
+                                if not save_action_found:
+                                    executed_actions.append({
+                                        "action_type": save_action.action_type.value,
+                                        "description": save_action.description,
+                                        "success": save_result.success,
+                                        "details": save_result.details,
+                                        "error": save_result.error,
+                                    })
+                                    results["actions_executed"] = executed_actions
+                                
+                                # Update context with the saved path if successful
+                                if save_result.success:
+                                    saved_path = save_result.details.get("saved_path")
+                                    if saved_path:
+                                        self.context.set_variable("last_saved_music", saved_path)
+                                
+                                # Recalculate the results message since we added/updated an action
+                                success_count = sum(1 for a in executed_actions if a.get("success"))
+                                if success_count == 0:
+                                    results["message"] = f"Failed to execute actions: {executed_actions[0].get('error', 'Unknown error')}"
+                                    results["type"] = "error"
+                                elif success_count < len(executed_actions):
+                                    results["message"] = f"Partially completed: {success_count}/{len(executed_actions)} actions succeeded."
+                                    results["type"] = "partial_success"
+                                else:
+                                    if len(executed_actions) == 1:
+                                        action_desc = executed_actions[0].get("description", "Action")
+                                        results["message"] = f"{action_desc} completed successfully."
+                                    else:
+                                        results["message"] = f"All {len(executed_actions)} actions completed successfully."
+                                    results["type"] = "success"
+            except asyncio.TimeoutError:
+                logger.warning("Timeout waiting for music generation response")
+        
+        return results
     
     async def _execute_actions(
         self,
@@ -247,6 +337,15 @@ class ConversationHandler:
                         # Already using cat, just add stdin
                         action.params["stdin"] = output_chain["llm_output"]
             
+            # Special handling: Skip music_save if music generation is still pending
+            if action.action_type == ActionType.MUSIC_SAVE:
+                # Check if music generation is still in progress
+                music_path = self.context.get_variable("last_generated_music")
+                if not music_path:
+                    # Music not generated yet - mark as skipped, will be executed after generation completes
+                    # Don't add it to executed_actions yet - it will be handled in approve_and_execute
+                    continue
+            
             # Execute action
             result = await self.orchestrator.execute_action(action, self.context)
             
@@ -266,6 +365,15 @@ class ConversationHandler:
                     output_chain["llm_output"] = result.details.get("content", "")
                 elif action.action_type == ActionType.IMAGE_GENERATE:
                     output_chain["image_path"] = result.details.get("image_path", "")
+                elif action.action_type == ActionType.MUSIC_GENERATE:
+                    # Music generation is async - result has "status": "pending"
+                    # The actual file_path will come later via the message bus
+                    if result.details.get("status") == "pending":
+                        # Mark as pending, will be updated when result arrives
+                        output_chain["music_pending"] = True
+                    else:
+                        # If we already have the file_path (from message bus processing), use it
+                        output_chain["music_path"] = result.details.get("file_path", "")
             
             # Update context updates dict for response
             context_updates.update(self.context.variables)
@@ -278,11 +386,21 @@ class ConversationHandler:
         # Build response message
         success_count = sum(1 for a in executed_actions if a["success"])
         
+        # Count actions that were actually executed (not skipped)
+        # For music_save, it might be skipped initially and added later in approve_and_execute
+        executed_count = len(executed_actions)
+        total_actions = len(actions)
+        
         if success_count == 0:
             response_message = f"Failed to execute actions: {executed_actions[0].get('error', 'Unknown error')}"
             response_type = "error"
-        elif success_count < len(actions):
-            response_message = f"Partially completed: {success_count}/{len(actions)} actions succeeded."
+        elif success_count < executed_count:
+            response_message = f"Partially completed: {success_count}/{executed_count} actions succeeded."
+            response_type = "partial_success"
+        elif executed_count < total_actions:
+            # Some actions were skipped (e.g., music_save waiting for generation)
+            # Message will be updated in approve_and_execute when all actions complete
+            response_message = f"Completed {success_count} action(s). Waiting for remaining actions..."
             response_type = "partial_success"
         else:
             # For LLM_GENERATE actions, use the actual generated content as the message

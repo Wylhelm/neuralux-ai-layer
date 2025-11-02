@@ -154,27 +154,35 @@ class OverlayConversationHandler:
                 _async_loop = None
                 _loop_thread = None
     
-    def _run_async(self, coro):
+    def _run_async(self, coro, timeout=None):
         """
         Run an async coroutine and return the result.
         
         Uses a dedicated event loop thread to avoid conflicts with GTK.
+        
+        Args:
+            coro: Coroutine to run
+            timeout: Optional timeout in seconds. If None, uses default (25.0) or extended (330.0) for music generation
         """
         loop = self._get_event_loop()
         if loop is None:
             raise RuntimeError("Could not get event loop")
         
+        # Default timeout is 25 seconds, but extend to 330 seconds (5.5 min) for music generation
+        if timeout is None:
+            timeout = 25.0
+        
         # Use asyncio.run_coroutine_threadsafe to execute in the loop thread
         future = asyncio.run_coroutine_threadsafe(
-            asyncio.wait_for(coro, timeout=25.0),
+            asyncio.wait_for(coro, timeout=timeout),
             loop
         )
         
         try:
-            # Wait for result with timeout
-            return future.result(timeout=30.0)
+            # Wait for result with timeout (add 5 seconds buffer)
+            return future.result(timeout=timeout + 5.0)
         except TimeoutError:
-            logger.error("Async operation timed out - resetting conversational event loop")
+            logger.error("Async operation timed out - resetting conversational event loop", timeout=timeout)
             future.cancel()
             # Force-reset loop to recover on next call
             self._reset_event_loop()
@@ -201,8 +209,21 @@ class OverlayConversationHandler:
             try:
                 logger.info("Processing message", input=user_input[:50])
                 
+                # Check if this is a music generation request
+                # If so, use extended timeout (330 seconds = 5.5 minutes)
+                lower_input = user_input.lower()
+                is_music_request = any(phrase in lower_input for phrase in [
+                    "generate music", "generate a song", "generate song",
+                    "create music", "create a song", "create song",
+                    "make music", "make a song", "make song",
+                    "compose music", "compose a song", "compose song",
+                    "song about", "music about"
+                ])
+                
+                timeout = 330.0 if is_music_request else None  # Extended timeout for music
+                
                 # Run with lazy initialization
-                result = self._run_async(self._process_message_internal(user_input))
+                result = self._run_async(self._process_message_internal(user_input), timeout=timeout)
                 logger.info("Message processed successfully", result_type=result.get("type"))
                 # Call callback in main thread
                 GLib.idle_add(lambda r=result: callback(r, None) or False)
@@ -260,14 +281,26 @@ class OverlayConversationHandler:
             callback: Function to call with (result_dict, error) when complete
         """
         import threading
+        from neuralux.conversation import ActionType
         
         def _worker():
             try:
-                logger.info("Executing approved actions")
+                logger.info("Approving and executing pending actions")
                 
-                # Run with lazy initialization
-                result = self._run_async(self._approve_and_execute_internal())
-                logger.info("Actions executed successfully")
+                # Check if any pending actions are music generation
+                has_music = False
+                if self._pending_actions:
+                    for action_data in self._pending_actions:
+                        action_type_str = action_data.get("action_type", "") if isinstance(action_data, dict) else None
+                        if action_type_str == ActionType.MUSIC_GENERATE.value:
+                            has_music = True
+                            break
+                
+                # Use extended timeout (330 seconds) for music generation
+                timeout = 330.0 if has_music else None
+                
+                result = self._run_async(self._approve_and_execute_internal(), timeout=timeout)
+                logger.info("Actions executed successfully", result_type=result.get("type"))
                 GLib.idle_add(lambda r=result: callback(r, None) or False)
                         
             except TimeoutError as timeout_err:
