@@ -6,6 +6,7 @@ from .web_card import WebSearchCard
 from .image_card import ImageGenerationCard
 from .llm_card import LLMGenerationCard
 from .system_command_card import SystemCommandCard
+from .music_card import MusicCard
 
 __all__ = [
     "CommandOutputCard",
@@ -14,4 +15,5 @@ __all__ = [
     "ImageGenerationCard",
     "LLMGenerationCard",
     "SystemCommandCard",
+    "MusicCard",
 ]

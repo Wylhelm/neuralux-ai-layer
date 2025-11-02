@@ -3,6 +3,7 @@ import json
 import asyncio
 import shutil
 import subprocess
+import html
 from typing import Dict, Any
 
 from services.agent import config
@@ -24,8 +25,8 @@ async def send_notification(suggestion: Dict[str, Any], nats_client):
 
     # Best-effort desktop notification (no need for separate `aish agent` process)
     if shutil.which("notify-send"):
-        title = suggestion.get("title") or "Neuralux Agent"
-        message = suggestion.get("message") or "New suggestion available."
+        title = html.escape(suggestion.get("title") or "Neuralux Agent")
+        message = html.escape(suggestion.get("message") or "New suggestion available.")
         actions = suggestion.get("actions") or []
         if isinstance(actions, list) and actions:
             hints = [f"• {a.get('label')}: {a.get('command')}" for a in actions if a.get("label")]

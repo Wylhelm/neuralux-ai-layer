@@ -62,7 +62,7 @@ start_service() {
 }
 
 # Core services
-for svc in llm filesystem health vision audio temporal agent system; do
+for svc in llm filesystem health vision audio temporal agent system music; do
   start_service "$svc"
 done
 

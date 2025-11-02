@@ -23,6 +23,8 @@ class ActionType(str, Enum):
     LLM_GENERATE = "llm_generate"
     IMAGE_GENERATE = "image_generate"
     IMAGE_SAVE = "image_save"
+    MUSIC_GENERATE = "music_generate"
+    MUSIC_SAVE = "music_save"
     OCR_CAPTURE = "ocr_capture"
     DOCUMENT_QUERY = "document_query"
     WEB_SEARCH = "web_search"

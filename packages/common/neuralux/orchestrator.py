@@ -106,6 +106,10 @@ class ActionOrchestrator:
                 result = await self._execute_llm_generate(action, context)
             elif action.action_type == ActionType.IMAGE_GENERATE:
                 result = await self._execute_image_generate(action, context)
+            elif action.action_type == ActionType.MUSIC_GENERATE:
+                result = await self._execute_music_generate(action, context)
+            elif action.action_type == ActionType.MUSIC_SAVE:
+                result = await self._execute_music_save(action, context)
             elif action.action_type == ActionType.IMAGE_SAVE:
                 result = await self._execute_image_save(action, context)
             elif action.action_type == ActionType.OCR_CAPTURE:
@@ -173,6 +177,16 @@ class ActionOrchestrator:
             image_path = details.get("image_path")
             if image_path:
                 context.set_variable("last_generated_image", image_path)
+        
+        elif action.action_type == ActionType.MUSIC_GENERATE:
+            music_path = details.get("file_path")
+            if music_path:
+                context.set_variable("last_generated_music", music_path)
+        
+        elif action.action_type == ActionType.MUSIC_SAVE:
+            music_path = details.get("saved_path")
+            if music_path:
+                context.set_variable("last_saved_music", music_path)
         
         elif action.action_type == ActionType.IMAGE_SAVE:
             image_path = details.get("saved_path")
@@ -467,7 +481,106 @@ class ActionOrchestrator:
                 action_type=ActionType.IMAGE_GENERATE,
                 timestamp=time.time(),
                 success=False,
-                error=f"Image generation failed: {e}",
+                    error=f"Image generation failed: {e}",
+                )
+
+    async def _execute_music_generate(self, action: Action, context: ConversationContext) -> ActionResult:
+        """Execute music generation."""
+        prompt = action.params.get("prompt")
+        
+        if not prompt:
+            return ActionResult(
+                action_type=ActionType.MUSIC_GENERATE,
+                timestamp=time.time(),
+                success=False,
+                error="Missing prompt parameter",
+            )
+        
+        try:
+            # Call music service for music generation
+            request = {
+                "prompt": prompt,
+                "user_id": context.user_id,
+                "conversation_id": context.session_id,
+            }
+            
+            # Publish the request and return immediately.
+            # The ConversationHandler will await the final result.
+            await self.message_bus.publish("agent.music.generate", request)
+            
+            return ActionResult(
+                action_type=ActionType.MUSIC_GENERATE,
+                timestamp=time.time(),
+                success=True,
+                details={
+                    "status": "pending",
+                    "prompt": prompt,
+                },
+            )
+            
+        except Exception as e:
+            return ActionResult(
+                action_type=ActionType.MUSIC_GENERATE,
+                timestamp=time.time(),
+                success=False,
+                error=f"Music generation failed: {e}",
+            )
+
+    async def _execute_music_save(self, action: Action, context: ConversationContext) -> ActionResult:
+        """Execute music save to specified location."""
+        src_path = action.params.get("src_path")
+        dst_path = action.params.get("dst_path")
+        
+        if not src_path:
+            return ActionResult(
+                action_type=ActionType.MUSIC_SAVE,
+                timestamp=time.time(),
+                success=False,
+                error="Missing src_path parameter",
+            )
+        
+        if not dst_path:
+            return ActionResult(
+                action_type=ActionType.MUSIC_SAVE,
+                timestamp=time.time(),
+                success=False,
+                error="Missing dst_path parameter",
+            )
+        
+        try:
+            src = Path(src_path)
+            if not src.exists():
+                return ActionResult(
+                    action_type=ActionType.MUSIC_SAVE,
+                    timestamp=time.time(),
+                    success=False,
+                    error=f"Source music file not found: {src_path}",
+                )
+            
+            dst = PathExpander.expand(dst_path, context.working_directory)
+            
+            if dst.is_dir() or dst_path.endswith("/") or not dst.suffix:
+                dst.mkdir(parents=True, exist_ok=True)
+                filename = src.name if src.name else f"neuralux_music_{int(time.time())}.wav"
+                dst = dst / filename
+            else:
+                dst.parent.mkdir(parents=True, exist_ok=True)
+            
+            success, error = FileOperations.copy_file(src, dst, overwrite=True)
+            
+            return ActionResult(
+                action_type=ActionType.MUSIC_SAVE,
+                timestamp=time.time(),
+                success=success,
+                details={"saved_path": str(dst), "original_path": str(src)},
+                error=error,
+            )
+        except Exception as e:
+            return ActionResult(
+                action_type=ActionType.MUSIC_SAVE,
+                timestamp=time.time(),
+                success=False,
+                error=f"Failed to save music: {str(e)}",
             )
     
     async def _execute_image_save(self, action: Action, context: ConversationContext) -> ActionResult:

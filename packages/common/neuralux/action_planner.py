@@ -91,6 +91,7 @@ class ActionPlanner:
         logger.info("planned_actions", count=len(actions), explanation=explanation)
         return actions, explanation
     
+    
     def _try_quick_reference_patterns(
         self,
         user_input: str,
@@ -283,29 +284,37 @@ AI-SPECIFIC ACTIONS (not shell commands):
 2. image_generate - Generate an image with AI
    params: prompt (str), width (int, default 1024), height (int, default 1024), steps (int, default 4)
    needs_approval: false
-   
-3. image_save - Save AI-generated image to a specific location
+
+3. music_generate - Generate music with AI
+   params: prompt (str), duration (int, default 30)
+   needs_approval: false
+
+4. music_save - Save AI-generated music to a specific location
    params: src_path (str), dst_path (str)
    needs_approval: true
    
-4. ocr_capture - Extract text from image/screen with OCR
+5. image_save - Save AI-generated image to a specific location
+   params: src_path (str), dst_path (str)
+   needs_approval: true
+   
+6. ocr_capture - Extract text from image/screen with OCR
    params: image_path (str, optional), region (str, optional), language (str, optional)
    needs_approval: false
 
-5. document_query - Search indexed documents (RAG/semantic search)
+7. document_query - Search indexed documents (RAG/semantic search)
    params: query (str), limit (int, default 10)
    needs_approval: false
 
-6. web_search - Search the web using DuckDuckGo
+8. web_search - Search the web using DuckDuckGo
    params: query (str), limit (int, default 5)
    needs_approval: false
    
 COMMAND EXECUTION (for file/system operations):
-7. command_execute - Execute ANY shell command
+9. command_execute - Execute ANY shell command
    params: command (str)
    needs_approval: true (ALWAYS)
 
-8. system_command - Execute a system action via the system service
+10. system_command - Execute a system action via the system service
    params: action (str), payload (dict)
    needs_approval: true (ALWAYS)
    
@@ -340,7 +349,11 @@ Important rules:
 3. When generating content for a file: llm_generate first, then command_execute with echo
 4. Use proper shell quoting for content with special characters
 5. Chain actions: one action's output feeds into the next
-6. For image operations: use image_save (not command_execute) to save generated images
+6. For image operations: use image_generate and image_save. Do not use command_execute to save generated images.
+7. For music operations: use music_generate and music_save. Do not confuse with image actions.
+8. If the user asks to "generate a song" or "generate music", you MUST use the `music_generate` action. Do NOT use `llm_generate` for lyrics unless the user explicitly asks for "lyrics".
+9. Only perform the actions the user explicitly asks for. If the user says "generate a song", do NOT save it to a file unless they also say "and save it".
+10. For `music_generate`, do NOT chain it with `command_execute` to write the output to a file. The music is not text.
 
 Examples:
 
@@ -376,6 +389,15 @@ Response: {{"explanation": "Generating image", "actions": [{{"action_type": "ima
 
 User: "save it to Pictures"  (after generating image)
 Response: {{"explanation": "Saving image", "actions": [{{"action_type": "image_save", "params": {{"src_path": "{{last_generated_image}}", "dst_path": "~/Pictures"}}, "description": "Save to Pictures folder", "needs_approval": true}}]}}
+
+User: "generate a heavy metal song and save it"
+Response: {{"explanation": "Generating and saving a heavy metal song", "actions": [
+  {{"action_type": "music_generate", "params": {{"prompt": "a heavy metal song"}}, "description": "Generate heavy metal song", "needs_approval": false}},
+  {{"action_type": "music_save", "params": {{"src_path": "{{last_generated_music}}", "dst_path": "~/Music"}}, "description": "Save to Music folder", "needs_approval": true}}
+]}}
+
+User: "a pop song about a cat"
+Response: {{"explanation": "Generating a pop song about a cat", "actions": [{{"action_type": "music_generate", "params": {{"prompt": "a pop song about a cat"}}, "description": "Generate a pop song about a cat", "needs_approval": false}}]}}
 
 User: "show my docker containers"
 Response: {{"explanation": "Listing containers", "actions": [{{"action_type": "command_execute", "params": {{"command": "docker ps -a"}}, "description": "Execute: docker ps -a", "needs_approval": true}}]}}
@@ -423,7 +445,9 @@ Now plan the actions for the user's request."""
         imperative_keywords = (
             "open", "create", "write", "save", "move", "delete",
             "list files", "search files", "run", "execute", "install",
-            "generate image", "ocr", "web search",
+            "generate", "generate image", "generate music", "generate song",
+            "song", "music",
+            "ocr", "web search",
         )
         if any(k in lower_input for k in imperative_keywords):
             return False
@@ -536,6 +560,26 @@ Now plan the actions for the user's request."""
             ))
             explanation = f"Writing content to {file_path}"
         
+        # Pattern: Save music
+        elif "save" in lower_input and ("music" in lower_input or "song" in lower_input or ("it" in lower_input and context.get_variable("last_generated_music"))):
+            # Extract destination
+            dest_match = re.search(r"to\s+(?:my\s+)?(.+?)(?:\s+folder|$)", lower_input)
+            if dest_match:
+                destination = dest_match.group(1).strip()
+            else:
+                destination = "~/Music"
+            
+            src_path = resolved_values.get("music_path") or context.get_variable("last_generated_music", "")
+            
+            if src_path:
+                actions.append(Action(
+                    action_type=ActionType.MUSIC_SAVE,
+                    params={"src_path": src_path, "dst_path": destination},
+                    description=f"Save music to {destination}",
+                    needs_approval=True,
+                ))
+                explanation = f"Saving music to {destination}"
+        
         # Pattern: Generate image
         elif "generate" in lower_input and "image" in lower_input:
             # Extract prompt (everything after "of" or "image")
@@ -552,6 +596,23 @@ Now plan the actions for the user's request."""
                 needs_approval=False,
             ))
             explanation = f"Generating image: {prompt}"
+
+        # Pattern: Generate music
+        elif "generate" in lower_input and ("music" in lower_input or "song" in lower_input):
+            # Extract prompt
+            prompt_match = re.search(r"(?:music|song)\s+(?:of\s+|about\s+)?(.+)", lower_input)
+            if prompt_match:
+                prompt = prompt_match.group(1).strip()
+            else:
+                prompt = "an upbeat, happy song"
+            
+            actions.append(Action(
+                action_type=ActionType.MUSIC_GENERATE,
+                params={"prompt": prompt},
+                description=f"Generate music: {prompt}",
+                needs_approval=False,
+            ))
+            explanation = f"Generating music: {prompt}"
         
         # Pattern: Save image
         elif "save" in lower_input and ("image" in lower_input or "it" in lower_input):
@@ -732,6 +793,10 @@ Now plan the actions for the user's request."""
                     last_ocr = context.get_variable("last_ocr_text", "")
                     value = value.replace("{{last_ocr_text}}", last_ocr)
                 
+                if "{{last_generated_music}}" in value:
+                    last_music = context.get_variable("last_generated_music", "")
+                    value = value.replace("{{last_generated_music}}", last_music)
+                
                 # Note: {{llm_output}} will be handled during execution
                 
                 action.params[key] = value
@@ -740,3 +805,7 @@ Now plan the actions for the user's request."""
         if action.action_type == ActionType.IMAGE_SAVE:
             if "src_path" not in action.params and "image_path" in resolved_values:
                 action.params["src_path"] = resolved_values["image_path"]
+        
+        if action.action_type == ActionType.MUSIC_SAVE:
+            if "src_path" not in action.params and "music_path" in resolved_values:
+                action.params["src_path"] = resolved_values["music_path"]

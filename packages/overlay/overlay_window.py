@@ -1504,7 +1504,7 @@ class OverlayWindow(Gtk.ApplicationWindow):
         self.show_toast(f"Error: {error}")
 
     async def _handle_suggestion(self, suggestion):
-        """Handle incoming suggestions from the agent."""
+        """Handle incoming suggestions from the agent by creating an interactive card."""
         if not isinstance(suggestion, dict):
             return
 
@@ -1512,48 +1512,63 @@ class OverlayWindow(Gtk.ApplicationWindow):
         message = suggestion.get("message") or ""
         actions = suggestion.get("actions") or []
 
-        def _render():
-            lines = [f"{title}"]
-            if message:
-                lines.append(message)
-            if isinstance(actions, list) and actions:
-                lines.append("")
-                for idx, action in enumerate(actions, 1):
-                    label = action.get("label") or f"Option {idx}"
-                    command = action.get("command")
-                    if command:
-                        lines.append(f"{idx}. {label} → {command}")
-                    else:
-                        lines.append(f"{idx}. {label}")
-
-            toast_text = "\n".join(lines)
+        def _create_suggestion_card():
             try:
-                self.show_toast(toast_text, 6000)
-            except Exception:
-                logger.exception("Failed to show agent suggestion toast")
+                card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+                card.add_css_class("assistant-message-box") # Reuse existing style
+                card.set_margin_top(4)
+                card.set_margin_bottom(4)
 
-            try:
-                if getattr(self, "conversation_history", None):
-                    history_lines = [f"🧠 {title}"]
-                    if message:
-                        history_lines.append(message)
-                    if isinstance(actions, list) and actions:
-                        history_lines.append("")
-                        for idx, action in enumerate(actions, 1):
-                            label = action.get("label") or f"Option {idx}"
-                            command = action.get("command")
-                            if command:
-                                history_lines.append(f"{idx}. {label} → {command}")
-                            else:
-                                history_lines.append(f"{idx}. {label}")
-                    history_text = "\n".join([line for line in history_lines if line])
-                    self.conversation_history.add_assistant_message(history_text)
-            except Exception:
-                logger.exception("Failed to append agent suggestion to history")
+                # Title
+                title_label = Gtk.Label(xalign=0)
+                title_label.set_markup(f"<b>🧠 {GLib.markup_escape_text(title)}</b>")
+                card.append(title_label)
 
+                # Message
+                if message:
+                    msg_label = Gtk.Label(label=message, xalign=0, wrap=True)
+                    msg_label.set_margin_top(4)
+                    card.append(msg_label)
+
+                # Action buttons
+                if isinstance(actions, list) and actions:
+                    buttons_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+                    buttons_box.set_margin_top(8)
+                    
+                    for action in actions:
+                        label = action.get("label")
+                        command = action.get("command")
+                        if label and command:
+                            button = Gtk.Button(label=label)
+                            button.add_css_class("suggested-action")
+                            button.set_halign(Gtk.Align.START)
+                            button.connect("clicked", self._on_suggestion_action_clicked, command)
+                            buttons_box.append(button)
+                    
+                    card.append(buttons_box)
+
+                self.conversation_history.add_widget(card)
+                self.show_toast(f"New suggestion: {title}", 4000)
+
+            except Exception as e:
+                logger.error("Failed to render suggestion card", error=str(e), exc_info=True)
             return False
 
-        GLib.idle_add(_render)
+        GLib.idle_add(_create_suggestion_card)
+
+    def _on_suggestion_action_clicked(self, button, command):
+        """Handle click on a suggestion action button."""
+        if command:
+            # Hide the parent card of the button that was clicked
+            try:
+                parent = button.get_parent()
+                if parent:
+                    parent.set_visible(False)
+            except Exception:
+                pass
+            
+            logger.info(f"Executing suggested command: {command}")
+            self._process_conversational_input(command)
 
     # Dialogs -------------------------------------------------------------
 

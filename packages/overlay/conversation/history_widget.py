@@ -17,6 +17,7 @@ from .result_cards import (
     ImageGenerationCard,
     LLMGenerationCard,
     SystemCommandCard,
+    MusicCard,
 )
 
 logger = structlog.get_logger(__name__)
@@ -199,6 +200,11 @@ class ConversationHistoryWidget(Gtk.Box):
                     "width": details.get("width", 0),
                     "height": details.get("height", 0),
                     "generation_time": details.get("generation_time", 0),
+                })
+            elif action_type == "music_generate":
+                widget = MusicCard({
+                    "file_path": details.get("file_path", ""),
+                    "prompt": details.get("prompt", ""),
                 })
             elif action_type == "llm_generate":
                 widget = LLMGenerationCard({

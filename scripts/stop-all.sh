@@ -27,7 +27,7 @@ stop_service() {
   fi
 }
 
-for svc in llm filesystem health vision audio temporal agent system; do
+for svc in llm filesystem health vision audio temporal agent system music; do
   stop_service "$svc"
 done
 

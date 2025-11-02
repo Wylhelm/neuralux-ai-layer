@@ -21,6 +21,7 @@ class IntentType(str, Enum):
     SYSTEM_COMMAND = "system_command"
     OCR_REQUEST = "ocr_request"
     IMAGE_GEN = "image_gen"
+    MUSIC_GEN = "music_gen"
     CONVERSATION = "conversation"
     UNCLEAR = "unclear"
 
@@ -205,6 +206,21 @@ class IntentClassifier:
                 "confidence": 0.95,  # Higher confidence
                 "parameters": {"prompt": user_input},
                 "reasoning": "Image generation pattern",
+                "needs_approval": False
+            }
+
+        # Music generation
+        music_patterns = [
+            "generate song", "generate a song", "generate music",
+            "create song", "create a song", "create music",
+            "make a song", "make music", "compose a song", "compose music"
+        ]
+        if any(pattern in lower for pattern in music_patterns):
+            return {
+                "intent": IntentType.MUSIC_GEN,
+                "confidence": 0.95,
+                "parameters": {"prompt": user_input},
+                "reasoning": "Music generation pattern",
                 "needs_approval": False
             }
         
@@ -398,7 +414,10 @@ IMPORTANT DISTINCTIONS:
 9. **image_gen**: User wants to generate an image
    - "generate image of X", "create picture of Y", "draw Z"
 
-10. **conversation**: Continuing an ongoing conversation (when in chat mode)
+10. **music_gen**: User wants to generate a song or music
+    - "generate a song about X", "create music for Y"
+
+11. **conversation**: Continuing an ongoing conversation (when in chat mode)
     - Any input when chat mode is active
     - Follow-up questions or statements
 

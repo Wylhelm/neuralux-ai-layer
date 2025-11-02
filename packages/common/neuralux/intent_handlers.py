@@ -354,6 +354,35 @@ Current context:
             "prompt": prompt,
             "needs_approval": False
         }
+
+    async def handle_music_generation(self, user_input: str, params: Dict) -> Dict[str, Any]:
+        """
+        Handle music generation requests.
+        
+        Extracts or refines the prompt and returns music gen request.
+        """
+        prompt = params.get("prompt", user_input)
+        
+        # If prompt is the full input like "generate song about...", clean it up
+        lower_prompt = prompt.lower()
+        prefixes = [
+            "generate song about ", "generate song ", "create song about ", "create song ",
+            "make song about ", "make song ", "generate music about ", "generate music ",
+            "create music about ", "create music ", "compose song about ", "compose song ",
+            "compose music about ", "compose music "
+        ]
+        
+        for prefix in prefixes:
+            if lower_prompt.startswith(prefix):
+                prompt = prompt[len(prefix):].strip()
+                break
+        
+        return {
+            "type": "music_generation",
+            "content": prompt,
+            "prompt": prompt,
+            "needs_approval": False
+        }
     
     async def handle_system_command(self, user_input: str, params: Dict) -> Dict[str, Any]:
         """
@@ -476,6 +505,9 @@ class IntentRouter:
             
             elif intent == IntentType.IMAGE_GEN:
                 result = await self.handlers.handle_image_generation(user_input, params)
+
+            elif intent == IntentType.MUSIC_GEN:
+                result = await self.handlers.handle_music_generation(user_input, params)
             
             elif intent == IntentType.SYSTEM_COMMAND:
                 result = await self.handlers.handle_system_command(user_input, params)

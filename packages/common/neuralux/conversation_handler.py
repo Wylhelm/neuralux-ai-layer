@@ -118,9 +118,24 @@ class ConversationHandler:
                     "pending_actions": actions,  # Store for later execution
                 }
             
+            # Subscribe to conversation topic for real-time updates
+            response_future = asyncio.Future()
+            async def response_callback(msg):
+                if not response_future.done():
+                    response_future.set_result(msg)
+
+            await self.message_bus.subscribe(f"conversation.{self.session_id}", response_callback)
+
             # Execute actions
             results = await self._execute_actions(actions, explanation)
             
+            # Wait for a response from the service if the action was asynchronous
+            if any(a.action_type in [ActionType.MUSIC_GENERATE] for a in actions):
+                try:
+                    await asyncio.wait_for(response_future, timeout=300.0)
+                except asyncio.TimeoutError:
+                    logger.warning("Timeout waiting for music generation response")
+
             return results
             
         except Exception as e:
@@ -337,4 +352,3 @@ class ConversationHandler:
             "working_directory": self.context.working_directory,
             "last_updated": self.context.updated_at,
         }
-

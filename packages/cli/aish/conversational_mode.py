@@ -36,6 +36,7 @@ class ConversationalMode:
         self.handler: Optional[ConversationHandler] = None
         self.session_id = session_id or default_session_id()
         self.running = False
+        self.active_suggestion: Optional[Dict[str, Any]] = None
     
     async def connect(self):
         """Connect to message bus and initialize handler."""
@@ -95,6 +96,7 @@ class ConversationalMode:
                 border_style="yellow",
             )
         )
+        self.active_suggestion = suggestion
     
     def _approval_callback(self, action) -> bool:
         """Ask user for approval of an action."""
@@ -160,6 +162,10 @@ Type `help` for commands, `/reset` to clear context, or `exit` to quit.
                     break
 
                 if not user_input:
+                    continue
+
+                if self.active_suggestion:
+                    await self._handle_suggestion_response(user_input)
                     continue
                 
                 # Handle special commands
@@ -236,6 +242,50 @@ Type `help` for commands, `/reset` to clear context, or `exit` to quit.
         
         else:
             console.print(f"[cyan]🤖 {message}[/cyan]")
+
+    async def _handle_suggestion_response(self, user_input: str):
+        """Handle user response to an active suggestion."""
+        suggestion = self.active_suggestion
+        self.active_suggestion = None  # Clear suggestion once handled
+
+        if not suggestion or not isinstance(suggestion.get("actions"), list):
+            await self._process_message(user_input)
+            return
+
+        actions = suggestion["actions"]
+        selected_action = None
+
+        # Normalize input
+        user_input_lower = user_input.lower().strip()
+
+        if user_input_lower in ["y", "yes", "1"] and len(actions) >= 1:
+            selected_action = actions[0]
+        elif user_input_lower in ["n", "no", "ignore"]:
+            console.print("[dim]Suggestion ignored.[/dim]")
+            return
+        else:
+            try:
+                choice = int(user_input_lower)
+                if 1 <= choice <= len(actions):
+                    selected_action = actions[choice - 1]
+            except ValueError:
+                pass  # Not a number
+
+        if selected_action:
+            command = selected_action.get("command")
+            if command:
+                if command.lower() == "ignore":
+                    console.print("[dim]Suggestion ignored.[/dim]")
+                    return
+                
+                console.print(f"\n[bold cyan]You (from suggestion):[/bold cyan] {command}")
+                await self._process_message(command)
+            else:
+                # Handle actions without a command if necessary
+                console.print("[yellow]Selected option has no command.[/yellow]")
+        else:
+            # If input doesn't match any suggestion, process it as a new message
+            await self._process_message(user_input)
     
     def _show_planned_actions(self, actions: list):
         """Display planned actions."""
@@ -318,6 +368,8 @@ Type `help` for commands, `/reset` to clear context, or `exit` to quit.
                         console.print(f"    [dim]→ {details['file_path']}[/dim]")
                     if "image_path" in details:
                         console.print(f"    [dim]→ {details['image_path']}[/dim]")
+                    if "music_path" in details:
+                        console.print(f"    [dim]→ {details['music_path']}[/dim]")
                     if "stdout" in details and details["stdout"]:
                         # Show command output
                         stdout = details["stdout"].strip()

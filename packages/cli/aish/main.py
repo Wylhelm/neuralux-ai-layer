@@ -960,6 +960,23 @@ def status():
                     console.print("[yellow]⚠[/yellow] System service: Unexpected status")
         except:
             console.print("[red]✗[/red] System service: Not running")
+
+        # Check music service
+        try:
+            # Path is relative to project root, where aish is typically run from
+            pid_file = Path("data/run/music.pid")
+            if pid_file.exists():
+                pid = pid_file.read_text().strip()
+                # Check if a process with this PID is running
+                import psutil
+                if psutil.pid_exists(int(pid)):
+                    console.print("[green]✓[/green] Music service: Running")
+                else:
+                    console.print("[red]✗[/red] Music service: Not running (stale PID file)")
+            else:
+                console.print("[red]✗[/red] Music service: Not running")
+        except Exception:
+            console.print("[red]✗[/red] Music service: Status check failed")
     
     asyncio.run(run())
 
@@ -2507,12 +2524,36 @@ def overlay(hotkey: bool, tray: bool, toggle: bool, show: bool, hide: bool):
             try:
                 import subprocess as _sp
                 import os as _os
+                
                 packages_dir = str(Path(__file__).parent.parent.parent)
-                env = _os.environ.copy()
-                env["PYTHONPATH"] = packages_dir + _os.pathsep + env.get("PYTHONPATH", "")
-                env["NEURALUX_APP_NAME"] = config.app_name
-                env["NEURALUX_TRAY_ICON"] = icon if isinstance(icon, str) else "utilities-terminal"
-                _sp.Popen([sys.executable, "-m", "overlay.tray_helper"], env=env)
+                python_path = packages_dir + _os.pathsep + _os.environ.get("PYTHONPATH", "")
+
+                # Use `env -i` to launch the helper in a clean environment, avoiding library conflicts.
+                cmd = ["env", "-i"]
+                
+                # Pass only essential environment variables.
+                essential_vars = {
+                    "PATH": _os.environ.get("PATH"),
+                    "DISPLAY": _os.environ.get("DISPLAY"),
+                    "DBUS_SESSION_BUS_ADDRESS": _os.environ.get("DBUS_SESSION_BUS_ADDRESS"),
+                    "XDG_RUNTIME_DIR": _os.environ.get("XDG_RUNTIME_DIR"),
+                    "HOME": _os.environ.get("HOME"),
+                    "USER": _os.environ.get("USER"),
+                    "LANG": _os.environ.get("LANG"),
+                    "LANGUAGE": _os.environ.get("LANGUAGE"),
+                    "LC_CTYPE": _os.environ.get("LC_CTYPE"),
+                    "PYTHONPATH": python_path,
+                    "NEURALUX_APP_NAME": config.app_name,
+                    "NEURALUX_TRAY_ICON": icon if isinstance(icon, str) else "utilities-terminal",
+                }
+                
+                for key, value in essential_vars.items():
+                    if value is not None:
+                        cmd.append(f"{key}={value}")
+                
+                cmd.extend([sys.executable, "-m", "overlay.tray_helper"])
+                
+                _sp.Popen(cmd)
                 console.print("[green]External tray helper started.[/green]")
             except Exception:
                 console.print("[yellow]Could not start external tray helper. Ensure ayatana-appindicator is installed.[/yellow]")
