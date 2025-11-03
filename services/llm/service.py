@@ -145,17 +145,13 @@ class LLMService:
     async def start(self):
         """Start the LLM service."""
         setup_logging(self.config.service_name, self.neuralux_config.log_level)
-        logger.info("Starting LLM service")
+        logger.info("Starting LLM service (models will load on first use)")
         
-        # Load model
-        try:
-            self.backend.load_model()
-        except FileNotFoundError as e:
-            logger.warning(str(e))
-            logger.warning("Service will start but requests will fail until model is loaded")
-        except Exception as e:
-            logger.error("Failed to load model", error=str(e))
-            raise
+        # Don't load model on startup - use lazy loading instead
+        
+        # Start background task for automatic model unloading
+        import asyncio
+        asyncio.create_task(self._unload_inactive_models())
         
         # Connect to message bus
         try:
@@ -181,6 +177,19 @@ class LLMService:
         logger.info("Stopping LLM service")
         await self.message_bus.disconnect()
         self.backend.unload_model()
+    
+    async def _unload_inactive_models(self):
+        """Background task to unload inactive models."""
+        while True:
+            try:
+                await asyncio.sleep(60)  # Check every minute
+                if self.backend.should_unload():
+                    logger.info("Unloading inactive LLM model")
+                    self.backend.unload_model()
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.error("Error in model unload task", error=str(e))
 
 
 # Create service instance

@@ -1,5 +1,6 @@
 """Image generation backend with Flux model support."""
 
+import time
 import torch
 import structlog
 from pathlib import Path
@@ -36,6 +37,8 @@ class ImageGenerationBackend:
         self.pipeline = None
         self.current_model = None
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
+        self._last_used: float = 0.0  # Track last usage time
+        self._unload_timeout: int = 300  # Unload after 5 minutes of inactivity
         logger.info("Image generation backend initialized", device=self.device)
     
     def load_model(self, model_name: str = "flux-schnell") -> None:
@@ -143,6 +146,7 @@ class ImageGenerationBackend:
                 raise ValueError(f"Unknown model: {model_name}")
             
             self.current_model = model_name
+            self._last_used = time.time()  # Update usage time when loading
             _log_progress(f"✓ {model_name} ready!")
             logger.info("Model loaded successfully", model=model_name)
             
@@ -152,6 +156,15 @@ class ImageGenerationBackend:
             logger.error("Failed to load image generation model", model=model_name, error=str(e))
             raise
     
+    def should_unload(self) -> bool:
+        """Check if model should be unloaded due to inactivity."""
+        if self.pipeline is None:
+            return False
+        if self._last_used == 0.0:
+            return False
+        inactive_time = time.time() - self._last_used
+        return inactive_time > self._unload_timeout
+    
     def unload_model(self) -> None:
         """Unload the current model and free VRAM."""
         if self.pipeline is not None:
@@ -159,6 +172,7 @@ class ImageGenerationBackend:
             del self.pipeline
             self.pipeline = None
             self.current_model = None
+            self._last_used = 0.0
             
             # Force garbage collection and clear CUDA cache
             gc.collect()
@@ -193,6 +207,7 @@ class ImageGenerationBackend:
             _log_progress("No model loaded, loading default flux-schnell...")
             logger.info("No model loaded, loading default flux-schnell")
             self.load_model("flux-schnell")
+        self._last_used = time.time()  # Update usage time
         
         try:
             _log_progress(f"Generating {width}x{height} image ({num_inference_steps} steps)...")

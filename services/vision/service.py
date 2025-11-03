@@ -55,6 +55,9 @@ class VisionService:
 
     async def connect_to_message_bus(self) -> None:
         await self.message_bus.connect()
+        
+        # Start background task for automatic model unloading
+        asyncio.create_task(self._unload_inactive_models())
 
         prefix = self.config.nats_subject_prefix
 
@@ -157,6 +160,19 @@ class VisionService:
 
     async def disconnect_from_message_bus(self) -> None:
         await self.message_bus.disconnect()
+    
+    async def _unload_inactive_models(self):
+        """Background task to unload inactive models."""
+        while True:
+            try:
+                await asyncio.sleep(60)  # Check every minute
+                if self.image_gen.should_unload():
+                    logger.info("Unloading inactive image generation model")
+                    self.image_gen.unload_model()
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.error("Error in model unload task", error=str(e))
 
     def _setup_routes(self) -> None:
         @self.app.get("/")

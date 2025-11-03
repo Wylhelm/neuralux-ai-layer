@@ -1,6 +1,7 @@
 """Voice Activity Detection backend using Silero VAD."""
 
 import base64
+import time
 import torch
 import torchaudio
 from pathlib import Path
@@ -22,6 +23,8 @@ class VADBackend:
         self.config = config
         self.model = None
         self.utils = None
+        self._last_used: float = 0.0  # Track last usage time
+        self._unload_timeout: int = 300  # Unload after 5 minutes of inactivity
         
     def load_model(self) -> None:
         """Load the Silero VAD model."""
@@ -61,6 +64,7 @@ class VADBackend:
         """
         if self.model is None:
             self.load_model()
+        self._last_used = time.time()
         
         try:
             # Handle audio input
@@ -151,6 +155,33 @@ class VADBackend:
     def is_loaded(self) -> bool:
         """Check if model is loaded."""
         return self.model is not None
+    
+    def should_unload(self) -> bool:
+        """Check if model should be unloaded due to inactivity."""
+        if self.model is None:
+            return False
+        if self._last_used == 0.0:
+            return False
+        inactive_time = time.time() - self._last_used
+        return inactive_time > self._unload_timeout
+    
+    def unload_model(self) -> None:
+        """Unload the current model."""
+        if self.model:
+            logger.info("Unloading VAD model")
+            del self.model
+            self.model = None
+            self.utils = None
+            self._last_used = 0.0
+            # Force garbage collection and clear CUDA cache if available
+            try:
+                import gc
+                gc.collect()
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+            except ImportError:
+                pass
+            logger.info("VAD model unloaded")
     
     def get_model_info(self) -> dict:
         """Get model information."""

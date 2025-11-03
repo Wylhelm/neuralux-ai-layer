@@ -1,6 +1,7 @@
 """LLM backend using llama.cpp."""
 
 import os
+import time
 from pathlib import Path
 from typing import AsyncIterator, Dict, List, Optional
 
@@ -21,6 +22,8 @@ class LlamaCppBackend:
         self.config = config
         self.model: Optional[Llama] = None
         self.current_model_name: Optional[str] = None
+        self._last_used: float = 0.0  # Track last usage time
+        self._unload_timeout: int = 300  # Unload after 5 minutes of inactivity (configurable)
         
     def load_model(self, model_path: Optional[Path] = None) -> None:
         """Load a model from disk."""
@@ -74,8 +77,7 @@ class LlamaCppBackend:
     
     async def generate(self, request: LLMRequest) -> LLMResponse:
         """Generate a completion for the given request."""
-        if not self.model:
-            raise RuntimeError("No model loaded")
+        self.ensure_model_loaded()
         
         prompt = self._format_messages(request.messages)
         
@@ -115,8 +117,7 @@ class LlamaCppBackend:
     
     async def generate_stream(self, request: LLMRequest) -> AsyncIterator[str]:
         """Generate a streaming completion."""
-        if not self.model:
-            raise RuntimeError("No model loaded")
+        self.ensure_model_loaded()
         
         prompt = self._format_messages(request.messages)
         
@@ -147,8 +148,7 @@ class LlamaCppBackend:
     
     def get_embeddings(self, text: str) -> List[float]:
         """Get embeddings for text."""
-        if not self.model:
-            raise RuntimeError("No model loaded")
+        self.ensure_model_loaded()
         
         try:
             embedding = self.model.embed(text)
@@ -157,11 +157,37 @@ class LlamaCppBackend:
             logger.error("Embedding generation failed", error=str(e))
             raise
     
+    def ensure_model_loaded(self) -> None:
+        """Ensure model is loaded (lazy loading)."""
+        if self.model is None:
+            self.load_model()
+        self._last_used = time.time()
+    
+    def should_unload(self) -> bool:
+        """Check if model should be unloaded due to inactivity."""
+        if self.model is None:
+            return False
+        if self._last_used == 0.0:
+            return False
+        inactive_time = time.time() - self._last_used
+        return inactive_time > self._unload_timeout
+    
     def unload_model(self) -> None:
         """Unload the current model."""
         if self.model:
+            logger.info("Unloading LLM model", model=self.current_model_name)
             del self.model
             self.model = None
             self.current_model_name = None
+            self._last_used = 0.0
+            # Force garbage collection and clear CUDA cache if available
+            try:
+                import gc
+                gc.collect()
+                import torch
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+            except ImportError:
+                pass
             logger.info("Model unloaded")
 

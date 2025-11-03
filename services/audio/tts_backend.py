@@ -23,6 +23,8 @@ class TTSBackend:
         self.config = config
         self.voice = None
         self._model_name = None
+        self._last_used: float = 0.0  # Track last usage time
+        self._unload_timeout: int = 300  # Unload after 5 minutes of inactivity
         
     def load_model(self) -> None:
         """Load the Piper voice model."""
@@ -97,6 +99,7 @@ class TTSBackend:
         """
         if self.voice is None and not hasattr(self, '_use_mock'):
             self.load_model()
+        self._last_used = time.time()
         
         start_time = time.time()
         
@@ -193,6 +196,34 @@ class TTSBackend:
     def is_loaded(self) -> bool:
         """Check if model is loaded."""
         return self.voice is not None or hasattr(self, '_use_mock')
+    
+    def should_unload(self) -> bool:
+        """Check if model should be unloaded due to inactivity."""
+        if self.voice is None or hasattr(self, '_use_mock'):
+            return False
+        if self._last_used == 0.0:
+            return False
+        inactive_time = time.time() - self._last_used
+        return inactive_time > self._unload_timeout
+    
+    def unload_model(self) -> None:
+        """Unload the current model."""
+        if self.voice is not None:
+            logger.info("Unloading TTS model", model=self._model_name)
+            del self.voice
+            self.voice = None
+            self._model_name = None
+            self._last_used = 0.0
+            # Force garbage collection and clear CUDA cache if available
+            try:
+                import gc
+                gc.collect()
+                import torch
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+            except ImportError:
+                pass
+            logger.info("TTS model unloaded")
     
     def get_model_info(self) -> dict:
         """Get model information."""

@@ -1,5 +1,6 @@
 import asyncio
 import os
+import time
 from pathlib import Path
 import sys
 import structlog
@@ -7,6 +8,7 @@ import torch
 from transformers import AutoProcessor, MusicgenForConditionalGeneration
 from scipy.io.wavfile import write as write_wav
 import numpy as np
+import gc
 
 # Add project root to path to allow absolute imports from services
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
@@ -22,19 +24,22 @@ class MusicGenerationService:
         self.model = None
         self.processor = None
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
+        self._last_used: float = 0.0  # Track last usage time
+        self._unload_timeout: int = 300  # Unload after 5 minutes of inactivity
         
         # Ensure model directory exists
         self.model_path = Path(self.config.model_cache_dir)
         self.model_path.mkdir(parents=True, exist_ok=True)
 
     async def start(self):
-        logger.info("Starting Music Generation Service...")
+        logger.info("Starting Music Generation Service (models will load on first use)...")
         await self.message_bus.subscribe("agent.music.generate", self._handle_music_generation_request)
-        asyncio.create_task(self._ensure_model_loaded())
+        # Start background task for automatic model unloading
+        asyncio.create_task(self._unload_inactive_model())
 
     async def _ensure_model_loaded(self):
         if self.model is None or self.processor is None:
-            logger.info("Music generation model not found, downloading...", path=self.model_path)
+            logger.info("Loading music generation model...", path=self.model_path)
             try:
                 model_name = self.config.model_name
                 self.processor = AutoProcessor.from_pretrained(model_name, cache_dir=self.model_path)
@@ -43,6 +48,44 @@ class MusicGenerationService:
                 logger.info("Music generation model loaded successfully.")
             except Exception as e:
                 logger.error("Failed to load music generation model", error=str(e))
+                raise
+    
+    def should_unload(self) -> bool:
+        """Check if model should be unloaded due to inactivity."""
+        if self.model is None:
+            return False
+        if self._last_used == 0.0:
+            return False
+        inactive_time = time.time() - self._last_used
+        return inactive_time > self._unload_timeout
+    
+    async def _unload_inactive_model(self):
+        """Background task to unload inactive model."""
+        while True:
+            try:
+                await asyncio.sleep(60)  # Check every minute
+                if self.should_unload():
+                    logger.info("Unloading inactive music generation model")
+                    self.unload_model()
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.error("Error in model unload task", error=str(e))
+    
+    def unload_model(self) -> None:
+        """Unload the current model."""
+        if self.model is not None:
+            logger.info("Unloading music generation model")
+            del self.model
+            self.model = None
+            del self.processor
+            self.processor = None
+            self._last_used = 0.0
+            # Force garbage collection and clear CUDA cache
+            gc.collect()
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+            logger.info("Music generation model unloaded")
 
     async def _handle_music_generation_request(self, payload):
         prompt = payload.get("prompt")
@@ -60,6 +103,9 @@ class MusicGenerationService:
                 await self._ensure_model_loaded()
                 if self.model is None:
                     raise RuntimeError("Music generation model could not be loaded.")
+            
+            # Update usage time when model is used
+            self._last_used = time.time()
 
             inputs = self.processor(
                 text=[prompt],
@@ -75,7 +121,6 @@ class MusicGenerationService:
             
             # Generate a random filename
             import re
-            import time
             safe_prompt = re.sub(r'[^\\w\\s-]', '', prompt)[:50]
             safe_prompt = re.sub(r'[-\\s]+', '_', safe_prompt)
             timestamp = time.strftime("%Y%m%d-%H%M%S")

@@ -153,7 +153,36 @@ class ActionPlanner:
             resolved_values,
             context,
         )
-        
+
+        actions_dropped = False
+        if actions:
+            actions, dropped_any = self._sanitize_planned_actions(
+                user_input=user_input,
+                resolved_input=resolved_input,
+                resolved_values=resolved_values,
+                context=context,
+                actions=actions,
+            )
+            actions_dropped = dropped_any
+
+        if actions_dropped and not actions:
+            # If sanitization removed every action, fall back to deterministic planning
+            actions, explanation = self._fallback_plan_actions(
+                user_input,
+                resolved_values,
+                context,
+            )
+
+        if actions_dropped and actions:
+            # Ensure the explanation still matches the remaining actions
+            explanation_lower = explanation.lower()
+            has_music_action = any(action.action_type in (ActionType.MUSIC_GENERATE, ActionType.MUSIC_SAVE) for action in actions)
+            if "music" in explanation_lower and not has_music_action:
+                explanation = "Processing your request"
+            has_image_action = any(action.action_type in (ActionType.IMAGE_GENERATE, ActionType.IMAGE_SAVE) for action in actions)
+            if "image" not in explanation_lower and has_image_action:
+                explanation = explanation or "Processing your request"
+
         # Post-process actions (add resolved values and ensure required params)
         for action in actions:
             self._enrich_action_params(action, resolved_values, context)
@@ -528,6 +557,130 @@ Response: {{"explanation": "Creating directory", "actions": [{{"action_type": "c
 Now plan the actions for the user's request."""
         
         return prompt
+
+    def _sanitize_planned_actions(
+        self,
+        user_input: str,
+        resolved_input: str,
+        resolved_values: Dict[str, Any],
+        context: ConversationContext,
+        actions: List[Action],
+    ) -> Tuple[List[Action], bool]:
+        """Strip actions that clearly contradict the user request."""
+
+        combined_text = f"{user_input} {resolved_input}".lower()
+        mentions_music = self._mentions_music(combined_text)
+        mentions_image = self._mentions_image(combined_text)
+        mentions_save = self._mentions_save(combined_text)
+
+        sanitized: List[Action] = []
+        dropped_any = False
+
+        has_context_music = bool(context.get_variable("last_generated_music") or resolved_values.get("music_path"))
+        has_context_image = bool(context.get_variable("last_generated_image") or resolved_values.get("image_path"))
+
+        for action in actions:
+            if action.action_type in (ActionType.MUSIC_GENERATE, ActionType.MUSIC_SAVE):
+                if not mentions_music:
+                    logger.warning(
+                        "dropping_unrelated_music_action",
+                        user_input=user_input,
+                        description=action.description,
+                    )
+                    dropped_any = True
+                    continue
+                if action.action_type == ActionType.MUSIC_SAVE and not (mentions_save or has_context_music):
+                    logger.info(
+                        "dropping_music_save_without_context",
+                        user_input=user_input,
+                        description=action.description,
+                    )
+                    dropped_any = True
+                    continue
+
+            if action.action_type in (ActionType.IMAGE_GENERATE, ActionType.IMAGE_SAVE):
+                # Allow image save if we have context even without explicit mention
+                if action.action_type == ActionType.IMAGE_SAVE:
+                    if not mentions_save:
+                        logger.info(
+                            "dropping_image_save_without_user_request",
+                            user_input=user_input,
+                            description=action.description,
+                        )
+                        dropped_any = True
+                        continue
+                    if not (mentions_image or has_context_image):
+                        logger.info(
+                            "dropping_image_save_without_context",
+                            user_input=user_input,
+                            description=action.description,
+                        )
+                        dropped_any = True
+                        continue
+                else:  # IMAGE_GENERATE
+                    if not mentions_image:
+                        logger.info(
+                            "dropping_image_generate_without_prompt",
+                            user_input=user_input,
+                            description=action.description,
+                        )
+                        dropped_any = True
+                        continue
+
+            sanitized.append(action)
+
+        return sanitized, dropped_any
+
+    @staticmethod
+    def _mentions_music(text: str) -> bool:
+        music_keywords = (
+            "music",
+            "song",
+            "melody",
+            "tune",
+            "soundtrack",
+            "audio",
+            "track",
+            "beat",
+        )
+        return any(keyword in text for keyword in music_keywords)
+
+    @staticmethod
+    def _mentions_image(text: str) -> bool:
+        image_keywords = (
+            "image",
+            "picture",
+            "photo",
+            "photograph",
+            "art",
+            "artwork",
+            "drawing",
+            "painting",
+            "draw",
+            "paint",
+            "sketch",
+            "render",
+            "rendering",
+            "visual",
+            "illustration",
+            "wallpaper",
+            "graphic",
+            "poster",
+            "logo",
+            "illustrate",
+        )
+        return any(keyword in text for keyword in image_keywords)
+
+    @staticmethod
+    def _mentions_save(text: str) -> bool:
+        save_keywords = (
+            "save",
+            "download",
+            "store",
+            "export",
+            "copy",
+        )
+        return any(keyword in text for keyword in save_keywords)
 
     def _is_informational_query(self, lower_input: str) -> bool:
         """Heuristic to detect pure informational Q&A and conversational inputs.

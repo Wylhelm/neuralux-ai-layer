@@ -64,45 +64,51 @@ class AudioService:
         self.config.tts_models_dir.mkdir(parents=True, exist_ok=True)
         self.config.cache_dir.mkdir(parents=True, exist_ok=True)
         
-        # Load models in background to avoid blocking startup
-        asyncio.create_task(self._load_models_async())
+        # Don't load models on startup - use lazy loading instead
+        logger.info("Audio models will load on first use")
+        
+        # Start background task for automatic model unloading
+        asyncio.create_task(self._unload_inactive_models())
         
         # Connect to message bus
         await self.connect_to_message_bus()
         
         logger.info("Audio service started successfully")
     
-    async def _load_models_async(self):
-        """Load models asynchronously."""
-        try:
-            logger.info("Loading models in background")
-            
-            # Load STT model
+    async def _unload_inactive_models(self):
+        """Background task to unload inactive models."""
+        while True:
             try:
-                self.stt_backend.load_model()
+                await asyncio.sleep(60)  # Check every minute
+                
+                # Check and unload STT model
+                if self.stt_backend.should_unload():
+                    logger.info("Unloading inactive STT model")
+                    self.stt_backend.unload_model()
+                
+                # Check and unload TTS model
+                if self.tts_backend.should_unload():
+                    logger.info("Unloading inactive TTS model")
+                    self.tts_backend.unload_model()
+                
+                # Check and unload VAD model
+                if self.vad_backend and self.vad_backend.should_unload():
+                    logger.info("Unloading inactive VAD model")
+                    self.vad_backend.unload_model()
+                    
+            except asyncio.CancelledError:
+                break
             except Exception as e:
-                logger.warning("STT model loading failed", error=str(e))
-            
-            # Load TTS model
-            try:
-                self.tts_backend.load_model()
-            except Exception as e:
-                logger.warning("TTS model loading failed", error=str(e))
-            
-            # Load VAD model
-            if self.vad_backend:
-                try:
-                    self.vad_backend.load_model()
-                except Exception as e:
-                    logger.warning("VAD model loading failed", error=str(e))
-            
-            logger.info("Model loading completed")
-        except Exception as e:
-            logger.error("Error during model loading", error=str(e))
+                logger.error("Error in model unload task", error=str(e))
     
     async def shutdown(self):
         """Shutdown the audio service."""
         logger.info("Shutting down audio service")
+        # Unload all models
+        self.stt_backend.unload_model()
+        self.tts_backend.unload_model()
+        if self.vad_backend:
+            self.vad_backend.unload_model()
         await self.disconnect_from_message_bus()
         logger.info("Audio service stopped")
     

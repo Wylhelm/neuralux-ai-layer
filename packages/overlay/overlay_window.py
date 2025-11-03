@@ -7,7 +7,7 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Gdk", "4.0")
 
 from gi.repository import Gtk, Gdk, GLib
-from typing import Callable, Optional
+from typing import Callable, Optional, List
 import structlog
 
 from .config import OverlayConfig
@@ -782,6 +782,80 @@ class OverlayWindow(Gtk.ApplicationWindow):
     # ============================================================
     # RESULTS DISPLAY (CONVERSATIONAL)
     # ============================================================
+
+    def add_result(self, title: str, content: str = "", payload: Optional[dict] = None):
+        """
+        Add a result to the conversation history.
+        Compatibility method for legacy overlay API.
+        
+        Args:
+            title: Title/header for the result
+            content: Content/subtitle text
+            payload: Optional payload for clickable results (currently not used)
+        """
+        self._remove_empty_state()
+        
+        # Format as assistant message
+        if content:
+            message = f"**{title}**\n{content}"
+        else:
+            message = title
+        
+        self.conversation_history.add_assistant_message(message)
+    
+    def clear_results(self):
+        """Clear all results from the conversation history."""
+        self.conversation_history.clear_history()
+    
+    def add_buttons_row(self, title: str, buttons: List[tuple]):
+        """
+        Add a row of buttons to the conversation history.
+        
+        Args:
+            title: Title/header for the button row
+            buttons: List of (label, command) tuples
+        """
+        try:
+            from gi.repository import Gtk
+            
+            # Create a box for the button row
+            button_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+            button_box.set_margin_top(12)
+            button_box.set_margin_bottom(8)
+            
+            # Add title label
+            title_label = Gtk.Label()
+            title_label.set_markup(f"<b>{title}</b>")
+            title_label.set_halign(Gtk.Align.START)
+            title_label.set_margin_start(12)
+            button_box.append(title_label)
+            
+            # Create horizontal box for buttons
+            buttons_hbox = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+            buttons_hbox.set_halign(Gtk.Align.START)
+            buttons_hbox.set_margin_start(12)
+            buttons_hbox.set_margin_top(4)
+            
+            # Add buttons
+            for label, command in buttons:
+                btn = Gtk.Button(label=label)
+                # Use a factory function to properly capture the command in the closure
+                def make_handler(cmd):
+                    return lambda w: self.on_command(cmd)
+                btn.connect("clicked", make_handler(command))
+                buttons_hbox.append(btn)
+            
+            button_box.append(buttons_hbox)
+            
+            # Add to conversation history
+            self.conversation_history.add_widget(button_box)
+        except Exception as e:
+            logger.error("Failed to add button row", error=str(e))
+
+    def _remove_empty_state(self):
+        """Remove empty state if present (wrapper for conversation history)."""
+        if hasattr(self.conversation_history, '_empty_state'):
+            self.conversation_history._remove_empty_state()
 
     # ============================================================
     # STATUS & UI UPDATES
